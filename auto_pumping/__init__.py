@@ -26,7 +26,7 @@ class AutoPumping(ABC):
 
     def auto(self, **goal_state_data):
         self._plan_executor.execute_plan(
-            self._pumping_graph.make_plan(self._get_state(), **goal_state_data)
+            list(self._pumping_graph.make_plan(self._get_state(), **goal_state_data))
         )
 
     def cancel(self):
