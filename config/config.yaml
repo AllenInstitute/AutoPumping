@@ -1,0 +1,273 @@
+valves:
+  - VA
+  - VB
+  - VF
+  - VT
+  - VE
+  - VR
+  - VV1
+
+gauges:
+  - PLL
+
+pumps:
+  - roughing
+  - turbo
+
+stage:
+  - exchange
+  - loadlock
+  - microscope
+
+named_states:
+  imaging:
+    valves:
+      VA: open
+      VB: closed
+      VR: closed
+      VV1: closed
+    stage: microscope
+  exchange:
+    valves:
+      VB: open
+      VA: closed
+      VR: closed
+      VT: closed
+      VE: closed
+      VV1: closed
+    stage: exchange
+  venting:
+    valves:
+      VA: closed
+      VR: closed
+      VT: closed
+      VE: closed
+      VB: closed
+      VV1: open
+    stage: loadlock
+  roughing:
+    valves:
+      VA: closed
+      VB: closed
+      VR: open
+      VT: closed
+      VF: closed
+      VE: closed
+      VV1: closed
+    pumps:
+      roughing: "on"
+    stage: loadlock
+  pumping:
+    valves:
+      VA: closed
+      VB: closed
+      VR: closed
+      VT: open
+      VF: open
+      VE: closed
+      VV1: closed
+    pumps:
+      roughing: "on"
+      turbo: "on"
+    stage: loadlock
+  equalizing:
+    valves:
+      VA: closed
+      VB: closed
+      VR: closed
+      VE: open
+      VV1: closed
+    stage: loadlock
+
+initial_states:
+  - valves:
+      VA: open
+      VB: closed
+      VE: open
+      VT: open
+      VR: closed
+      VF: open
+      VV1: closed
+    stage: microscope
+    pumps:
+      roughing: "on"
+      turbo: "on"
+    gauges:
+      PLL: 5e-6
+
+transitions:
+  - stage: true
+    from: exchange
+    to: loadlock
+  - stage: true
+    from: loadlock
+    to: exchange
+    condition:
+      valve:
+        VB: open
+  - stage: true
+    from: loadlock
+    to: microscope
+    condition:
+      valve:
+        VA: open
+  - stage: true
+    from: microscope
+    to: loadlock
+  - valve: VA
+    from: closed
+    to: open
+    condition:
+      gauge:
+        PLL:
+          LE: 9e-6
+  - valve: VA
+    from: open
+    to: closed
+    condition:
+      stage: loadlock
+  - valve: VB
+    from: open
+    to: closed
+    condition:
+      stage: loadlock
+  - valve: VB
+    from: closed
+    to: open
+    condition:
+      gauge:
+        PLL:
+          GE: 450
+      valve:
+        VV1: closed
+  - valve: VF
+    from: open
+    to: closed
+  - valve: VF
+    from: closed
+    to: open
+    condition:
+      valve:
+        VR:
+          state: closed
+          time: 10
+      pump:
+        roughing:
+          state: "on"
+          time: 15
+    safety:
+      pump:
+        turbo:
+          current:
+            GE: 1.5
+  - valve: VT
+    from: open
+    to: closed
+  - valve: VT
+    from: closed
+    to: open
+    condition:
+      gauge:
+        PLL:
+          LE: 0.1
+      pump:
+        turbo:
+          state: "on"
+          current:
+            LE: 0.6
+      valve:
+        VF:
+          state: open
+          time: 10
+    pressure:
+      - PLL: 1e-5
+        time: 20
+      - PLL: 5e-6
+        time: 240
+  - valve: VE
+    from: open
+    to: closed
+  - valve: VE
+    from: closed
+    to: open
+    condition:
+      gauge:
+        PLL:
+          LE: 4.5e-5
+    pressure:
+      PLL: 5e-6
+      time: 40
+  - valve: VR
+    from: closed
+    to: open
+    condition:
+      pump:
+        roughing:
+          state: "on"
+          time: 15
+      valve:
+        VF: closed
+      gauge:
+        PLL:
+          GE: 0.1
+    pressure:
+      PLL: 5e-2
+      time: 5
+  - valve: VR
+    from: open
+    to: closed
+    wait:
+      PLL:
+        LE: 8.5e-2
+  - valve: VV1
+    from: closed
+    to: open
+    condition:
+      valve:
+        VT: closed
+        VR: closed
+        VA: closed
+        VB: closed
+        VE: closed
+    pressure:
+      PLL: 500
+      time: 5
+  - valve: VV1
+    from: open
+    to: closed
+  - pump: turbo
+    from: "off"
+    to: "on"
+    condition:
+      pump:
+        roughing: "on"
+      valve:
+        VF: open
+        VR: closed
+        VT: closed
+  - pump: turbo
+    from: "on"
+    to: "off"
+    condition:
+      valve:
+        VT: closed
+        VF: closed
+  - pump: roughing
+    from: "off"
+    to: "on"
+    condition:
+      valve:
+        VF: closed
+        VR: closed
+  - pump: roughing
+    from: "on"
+    to: "off"
+    condition:
+      pump:
+        turbo: "off"
+      valve:
+        VR: closed
+        VF: closed
+
+confirm:
+  default: True

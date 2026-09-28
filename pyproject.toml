@@ -1,0 +1,32 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "AutoPumping"
+version = "0.1.0"
+description = "A tool to automate pumping of vacuum systems"
+readme = "README.md"
+requires-python = ">=3.10"
+authors = [
+  { name = "Cameron Devine", email = "cameron.devine@alleninstitute.org" },
+]
+license = { text = "MIT" }
+classifiers = [
+  "Programming Language :: Python :: 3",
+  "License :: OSI Approved :: MIT License",
+  "Operating System :: OS Independent",
+]
+dependencies = [
+  "pydantic",
+  "pyyaml",
+  "networkx",
+]
+
+[project.optional-dependencies]
+dev = [
+  "pytest",
+]
+
+[tool.setuptools]
+packages = ["auto_pumping"]
