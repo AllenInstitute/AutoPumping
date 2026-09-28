@@ -33,6 +33,10 @@ class _Page:
         self._named_state_buttons = {}
         self._stage_buttons = {}
         self._gauge_labels = {}
+        self._confirm_dialog = None
+        self._confirm_content = None
+        self._shown_confirmation = None
+        self._plan_description = None
 
     def build(self):
         config = self._config
@@ -116,7 +120,29 @@ class _Page:
                     self._build_plan()
                     if diagram:
                         ui.image(diagram)
+        self._build_confirm_dialog()
         ui.timer(POLL_INTERVAL, self._refresh)
+
+    def _build_confirm_dialog(self):
+        # A safety prompt must get an explicit answer, so the dialog cannot be
+        # dismissed by clicking the backdrop or pressing Escape.
+        with ui.dialog().props("persistent") as dialog, ui.card():
+            ui.label("Confirm action").classes("text-lg font-bold")
+            self._confirm_content = ui.label()
+            with ui.card_actions().classes("justify-end w-full"):
+                ui.button("Cancel", on_click=lambda: self._on_confirm_response(False)).props(
+                    "outline color=primary"
+                )
+                ui.button("Confirm", on_click=lambda: self._on_confirm_response(True))
+        self._confirm_dialog = dialog
+
+    def _on_confirm_response(self, approved):
+        request = self._shown_confirmation
+        self._shown_confirmation = None
+        self._confirm_dialog.close()
+        if request is not None:
+            request.resolve(approved)
+        background_tasks.create(self._refresh())
 
     def _on_auto_mode_change(self):
         background_tasks.create(self._refresh())
@@ -125,7 +151,6 @@ class _Page:
         state = ValveState.OPEN if e.value else ValveState.CLOSED
         if self._auto_switch.value:
             await run.io_bound(self._pumping_system.auto, valves={valve: state})
-            self._build_plan.refresh()
         else:
             await run.io_bound(self._pumping_system._actuate_valve, valve, state)
         await self._refresh()
@@ -134,28 +159,26 @@ class _Page:
         state = PumpState.ON if e.value else PumpState.OFF
         if self._auto_switch.value:
             await run.io_bound(self._pumping_system.auto, pumps={pump: state})
-            self._build_plan.refresh()
         else:
             await run.io_bound(self._pumping_system._set_pump, pump, state)
         await self._refresh()
 
     async def _on_named_state_click(self, name):
         await run.io_bound(self._pumping_system.auto, name=name)
-        self._build_plan.refresh()
         await self._refresh()
 
     async def _on_stage_click(self, position):
         if self._auto_switch.value:
             await run.io_bound(self._pumping_system.auto, stage=position)
-            self._build_plan.refresh()
         else:
             await run.io_bound(self._pumping_system._move_stage, position)
         await self._refresh()
 
-    def _on_abort_plan(self):
-        self._pumping_system.cancel()
-        self._build_plan.refresh()
-        background_tasks.create(self._refresh())
+    async def _on_abort_plan(self):
+        # `cancel()` joins the executor thread, which can take up to a second,
+        # so keep it off the UI event loop.
+        await run.io_bound(self._pumping_system.cancel)
+        await self._refresh()
 
     def _get_snapshot(self):
         safety = self._pumping_system._safety_machine
@@ -183,13 +206,16 @@ class _Page:
             gauge: self._pumping_system.get_gauge_pressure(gauge)
             for gauge in self._config.gauges
         }
+        plan = self._pumping_system.plan
         return {
             "valves": valves,
             "pumps": pumps,
             "stage": stage,
             "stages": stages,
             "gauges": gauges,
-            "plan_active": bool(self._pumping_system.plan),
+            "plan_active": bool(plan),
+            "plan_description": [self._describe_step(step) for step in plan],
+            "pending_confirmation": self._pumping_system._plan_executor.pending_confirmation,
         }
 
     @staticmethod
@@ -280,6 +306,28 @@ class _Page:
             self._set_button_active(button, self._is_current_named_state(name, snapshot))
         for gauge, label in self._gauge_labels.items():
             label.text = f"{gauge}: {snapshot['gauges'][gauge]:.2e}"
+        self._sync_plan_card(snapshot)
+        self._sync_confirm_dialog(snapshot)
+
+    def _sync_plan_card(self, snapshot):
+        # The plan card is only rebuilt when the steps actually change, so the
+        # timeline stays current as the executor works through the plan.
+        if snapshot["plan_description"] != self._plan_description:
+            self._plan_description = snapshot["plan_description"]
+            self._build_plan.refresh()
+
+    def _sync_confirm_dialog(self, snapshot):
+        request = snapshot["pending_confirmation"]
+        if request is self._shown_confirmation:
+            return
+        if request is None:
+            # Answered in another tab, or the plan was cancelled.
+            self._shown_confirmation = None
+            self._confirm_dialog.close()
+            return
+        self._shown_confirmation = request
+        self._confirm_content.text = self._describe_step(request.step)
+        self._confirm_dialog.open()
 
     def _is_current_named_state(self, name, snapshot):
         named_state = self._config.named_states[name]
@@ -293,6 +341,19 @@ class _Page:
             return False
         return True
 
+    @staticmethod
+    def _describe_step(step):
+        if step.wait:
+            conditions = [ineq.to_str(gauge) for gauge, ineq in step.wait.items()]
+            return f"Wait for {_Page.oxford_comma(conditions)}"
+        if step.valve:
+            return f"{step.state.value.capitalize()} {step.valve}"
+        if step.pump:
+            return f"Turn {step.state.value} {step.pump} pump"
+        if step.stage:
+            return f"Move stage to {step.stage}"
+        return ""
+
     @ui.refreshable
     def _build_plan(self):
         if self._pumping_system.plan:
@@ -303,18 +364,7 @@ class _Page:
                 with ui.card_section():
                     with ui.timeline(side="right"):
                         for step in self._pumping_system.plan:
-                            if step.wait:
-                                conditions = [
-                                    ineq.to_str(gauge)
-                                    for gauge, ineq in step.wait.gauges.items()
-                                ]
-                                ui.timeline_entry(f"Wait for {self.oxford_comma(conditions)}")
-                            if step.valve:
-                                ui.timeline_entry(f"{step.state.value} {step.valve}")
-                            if step.pump:
-                                ui.timeline_entry(f"Turn {step.state.value} {step.pump} pump")
-                            if step.stage:
-                                ui.timeline_entry(f"Move stage to {step.stage}")
+                            ui.timeline_entry(self._describe_step(step))
                 ui.separator()
                 with ui.card_actions():
                     ui.button("Abort Plan", on_click=self._on_abort_plan)
