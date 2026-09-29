@@ -137,7 +137,7 @@ transitions:
     condition:
       gauge:
         PLL:
-          GE: 450
+          GE: 430
       valve:
         VV1: closed
   - valve: VF
@@ -235,6 +235,9 @@ transitions:
   - valve: VV1
     from: open
     to: closed
+    wait:
+      PLL:
+        GE: 450
   - pump: turbo
     from: "off"
     to: "on"

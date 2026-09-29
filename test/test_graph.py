@@ -84,7 +84,7 @@ def test_discretize_gauge_ranges(config):
         config.gauges, config.transitions
     )
     assert gauge_ranges == {
-        "PLL": [(0, 9e-6), (9e-6, 4.5e-5), (4.5e-5, 0.1), (0.1, 450), (450, inf)]
+        "PLL": [(0, 9e-6), (9e-6, 4.5e-5), (4.5e-5, 0.1), (0.1, 430), (430, inf)]
     }
 
 
@@ -121,8 +121,8 @@ def test_add_initial_states(config):
         (1e-6, (0, 9e-6)),
         (9e-6, (9e-6, 4.5e-5)),
         (4.5e-5, (4.5e-5, 0.1)),
-        (0.1, (0.1, 450)),
-        (450, (450, inf)),
+        (0.1, (0.1, 430)),
+        (450, (430, inf)),
     ],
 )
 def test_get_gauge_range(config, pressure, expected_range):

@@ -256,3 +256,172 @@ def test_confirmation_dialog_closes_if_state_becomes_unknown_while_shown():
         snapshot({"valves": ["VA"], "pumps": [], "stage": False}, pending=request)
     )
     assert page._confirm_dialog.is_open is False
+
+
+# --- GaugeHistory ---------------------------------------------------------
+
+
+def test_history_records_samples_in_order():
+    history = GaugeHistory(["PLL"])
+    history.record({"PLL": 1e-5}, now=100.0)
+    history.record({"PLL": 2e-5}, now=101.0)
+    assert history.series() == {
+        "PLL": [[100_000, 1e-5], [101_000, 2e-5]]
+    }
+
+
+def test_history_timestamps_are_milliseconds():
+    history = GaugeHistory(["PLL"])
+    history.record({"PLL": 1e-5}, now=1.5)
+    assert history.series()["PLL"][0][0] == 1500
+
+
+def test_history_dedupes_samples_that_are_too_close():
+    history = GaugeHistory(["PLL"], min_interval=0.5)
+    assert history.record({"PLL": 1e-5}, now=100.0) is True
+    # A second tab polling almost simultaneously must not double-sample.
+    assert history.record({"PLL": 2e-5}, now=100.1) is False
+    assert history.record({"PLL": 3e-5}, now=100.6) is True
+    assert history.series()["PLL"] == [[100_000, 1e-5], [100_600, 3e-5]]
+
+
+def test_history_drops_samples_outside_the_window():
+    history = GaugeHistory(["PLL"], window=10.0, min_interval=0.0)
+    for offset in range(0, 25, 5):
+        history.record({"PLL": 1e-5}, now=100.0 + offset)
+    timestamps = [point[0] for point in history.series()["PLL"]]
+    # now=120, window=10 -> anything before t=110 is dropped.
+    assert timestamps == [110_000, 115_000, 120_000]
+
+
+@mark.parametrize("value", [0, -1e-6, None])
+def test_history_maps_unplottable_readings_to_none(value):
+    history = GaugeHistory(["PLL"])
+    history.record({"PLL": value}, now=100.0)
+    # A log axis cannot show these; a gap is honest, a clamped value is not.
+    assert history.series() == {"PLL": [[100_000, None]]}
+
+
+def test_history_keeps_positive_readings_intact():
+    history = GaugeHistory(["PLL"], min_interval=0.0)
+    history.record({"PLL": 5e-6}, now=100.0)
+    history.record({"PLL": 0.0}, now=101.0)
+    history.record({"PLL": 7e-6}, now=102.0)
+    assert history.series()["PLL"] == [
+        [100_000, 5e-6],
+        [101_000, None],
+        [102_000, 7e-6],
+    ]
+
+
+def test_history_tracks_each_gauge_separately():
+    history = GaugeHistory(["A", "B"])
+    history.record({"A": 1e-5, "B": 2e-5}, now=100.0)
+    assert history.series() == {"A": [[100_000, 1e-5]], "B": [[100_000, 2e-5]]}
+
+
+def test_history_reports_missing_gauge_as_gap():
+    history = GaugeHistory(["A", "B"])
+    history.record({"A": 1e-5}, now=100.0)
+    assert history.series()["B"] == [[100_000, None]]
+
+
+def test_history_starts_empty():
+    assert GaugeHistory(["PLL"]).series() == {"PLL": []}
+
+
+def test_history_is_shared_between_pages(config):
+    # A tab opened later should see history already collected, not a blank plot.
+    history = GaugeHistory(config.gauges)
+    history.record({gauge: 1e-5 for gauge in config.gauges}, now=100.0)
+    page = _Page.__new__(_Page)
+    page._history = history
+    assert page._history.series()[config.gauges[0]] == [[100_000, 1e-5]]
+
+
+class _StubChart:
+    """Stands in for `ui.echart`, which needs a browser client to exist."""
+
+    def __init__(self, options):
+        self.options = options
+        self.updates = 0
+
+    def update(self):
+        self.updates += 1
+
+
+def _chart_page(config):
+    page = _Page.__new__(_Page)
+    page._config = config
+    page._gauge_chart = _StubChart(page._gauge_chart_options())
+    return page
+
+
+def test_chart_uses_a_log_pressure_axis(config):
+    options = _chart_page(config)._gauge_chart.options
+    assert options["yAxis"]["type"] == "log"
+    assert options["xAxis"]["type"] == "time"
+    assert [s["name"] for s in options["series"]] == list(config.gauges)
+
+
+def test_applying_series_fills_the_chart(config):
+    page = _chart_page(config)
+    gauge = config.gauges[0]
+    page._apply_gauge_series({gauge: [[100_000, 1e-5]]})
+    series = {s["name"]: s["data"] for s in page._gauge_chart.options["series"]}
+    assert series[gauge] == [[100_000, 1e-5]]
+    assert page._gauge_chart.updates == 1
+
+
+def test_applying_unchanged_series_does_not_redraw(config):
+    page = _chart_page(config)
+    data = {gauge: [[100_000, 1e-5]] for gauge in config.gauges}
+    page._apply_gauge_series(data)
+    page._apply_gauge_series(data)
+    # Pushing an identical frame every second would redraw the plot for nothing.
+    assert page._gauge_chart.updates == 1
+
+
+def test_applying_series_without_a_chart_is_a_no_op(config):
+    page = _Page.__new__(_Page)
+    page._config = config
+    page._gauge_chart = None
+    page._apply_gauge_series({})
+
+
+def test_recorded_history_reaches_the_chart(config):
+    # The whole path: reading -> history -> series -> chart data.
+    history = GaugeHistory(config.gauges, min_interval=0.0)
+    page = _chart_page(config)
+    gauge = config.gauges[0]
+    history.record({g: 1e-5 for g in config.gauges}, now=100.0)
+    history.record({g: 2e-5 for g in config.gauges}, now=101.0)
+    page._apply_gauge_series(history.series())
+    series = {s["name"]: s["data"] for s in page._gauge_chart.options["series"]}
+    assert series[gauge] == [[100_000, 1e-5], [101_000, 2e-5]]
+
+
+def test_snapshot_accumulates_gauge_history(config, system):
+    # Drives the real read path: hardware -> history -> snapshot -> chart.
+    page = _chart_page(config)
+    page._pumping_system = system
+    page._history = GaugeHistory(config.gauges, min_interval=0.0)
+    gauge = config.gauges[0]
+
+    for _ in range(3):
+        snapshot = page._get_snapshot()
+        page._apply_gauge_series(snapshot["gauge_series"])
+
+    series = {s["name"]: s["data"] for s in page._gauge_chart.options["series"]}
+    assert len(series[gauge]) == 3
+    timestamps = [point[0] for point in series[gauge]]
+    assert timestamps == sorted(timestamps)
+
+
+def test_pressure_axis_labels_use_a_javascript_formatter(config):
+    axis_label = _chart_page(config)._gauge_chart.options["yAxis"]["axisLabel"]
+    # The ':' prefix is what makes NiceGUI send this as a function, not a string.
+    assert ":formatter" in axis_label
+    assert "toExponential" in axis_label[":formatter"]
+    # Arrow syntax would be mangled by HTML escaping of '>' in the page.
+    assert "=>" not in axis_label[":formatter"]
