@@ -85,6 +85,7 @@ class _Page:
                                     )
                                     ui.label("Open")
                                     self._valve_switches[valve] = switch
+            self._build_plan()
             with ui.column().classes('grow'):
                 if config.stage:
                     with ui.card().tight().classes('w-full'):
@@ -122,10 +123,8 @@ class _Page:
                                     "flow": flow_label,
                                     "speed": speed_label,
                                 }
-                with ui.row():
-                    self._build_plan()
-                    if diagram:
-                        ui.image(diagram)
+                if diagram:
+                    ui.image(diagram)
         self._build_confirm_dialog()
         self._build_unknown_dialog()
         ui.timer(POLL_INTERVAL, self._refresh)
