@@ -61,23 +61,23 @@ class SafetyMachine:
             ):
                 return False
         for pump, condition in conditions.pump.items():
-            if self._pumping_system.get_pump_state(pump) != condition.state:
+            if condition.state is not None and self._pumping_system.get_pump_state(pump) != condition.state:
                 return False
             if (
                 condition.time is not None
                 and time() - self._pump_times[pump] < condition.time
             ):
                 return False
-            if not condition.current.evaluate(
+            if condition.current is not None and not condition.current.evaluate(
                 self._pumping_system.get_pump_current(pump)
             ):
                 return False
-            if not condition.voltage.evaluate(
+            if condition.voltage is not None and not condition.voltage.evaluate(
                 self._pumping_system.get_pump_voltage(pump)
             ):
                 return False
-            if not condition.flow.evaluate(self._pumping_system.get_pump_flow(pump)):
+            if condition.flow is not None and not condition.flow.evaluate(self._pumping_system.get_pump_flow(pump)):
                 return False
-            if not condition.speed.evaluate(self._pumping_system.get_pump_speed(pump)):
+            if condition.speed is not None and not condition.speed.evaluate(self._pumping_system.get_pump_speed(pump)):
                 return False
         return True

@@ -43,6 +43,7 @@ class AutoPumping(ABC):
             },
             "pumps": {pump: self.get_pump_state(pump) for pump in self._config.pumps},
             "stage": self.get_stage_position(),
+            "gauges": {gauge: self._pumping_graph._get_gauge_range(gauge, self.get_gauge_pressure(gauge)) for gauge in self._config.gauges},
         }
 
     @classmethod
