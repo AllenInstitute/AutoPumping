@@ -137,27 +137,38 @@ class PlanExecutor:
             if self._current_step is None:
                 self._current_step = self._plan.pop(0)
             step = self._current_step
-            if not self._request_confirmation(step):
-                # Rejected (or cancelled): stop here, leaving completed steps applied.
-                self._plan = None
-                self._current_step = None
-                self._confirmed_step = None
-                return
             if step.wait is not None:
                 if self._wait_satisfied(step):
                     self._current_step = None
                     continue
-            elif step.stage is not None and self._pumping_system._move_stage(step.stage):
-                self._current_step = None
-                continue
-            elif step.valve is not None and self._pumping_system._actuate_valve(
-                step.valve, step.state
-            ):
-                self._current_step = None
-                continue
-            elif step.pump is not None and self._pumping_system._set_pump(
-                step.pump, step.state
-            ):
-                self._current_step = None
-                continue
+            elif step.stage is not None and self._pumping_system._safety_machine.can_move_stage(step.stage):
+                if self._request_confirmation(step):
+                    self._pumping_system._move_stage(step.stage)
+                    self._current_step = None
+                    continue
+                else:
+                    self._plan = None
+                    self._current_step = None
+                    self._confirmed_step = None
+                    return
+            elif step.valve is not None and self._pumping_system._safety_machine.can_actuate_valve(step.valve, step.state):
+                if self._request_confirmation(step):
+                    self._pumping_system._actuate_valve(step.valve, step.state)
+                    self._current_step = None
+                    continue
+                else:
+                    self._plan = None
+                    self._current_step = None
+                    self._confirmed_step = None
+                    return
+            elif step.pump is not None and self._pumping_system._safety_machine._can_set_pump(step.pump, step.state):
+                if self._wait_satisfied(step):
+                    self._pumping_system._set_pump(step.pump, step.state)
+                    self._current_step = None
+                    continue
+                else:
+                    self._plan = None
+                    self._current_step = None
+                    self._confirmed_step = None
+                    return
             sleep(1)
