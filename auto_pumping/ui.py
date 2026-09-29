@@ -37,6 +37,12 @@ class _Page:
         self._confirm_content = None
         self._shown_confirmation = None
         self._plan_description = None
+        self._unknown_dialog = None
+        self._unknown_state = None
+        self._unknown_valve_switches = {}
+        self._unknown_pump_switches = {}
+        self._unknown_stage_toggle = None
+        self._unknown_submit_button = None
 
     def build(self):
         config = self._config
@@ -121,7 +127,145 @@ class _Page:
                     if diagram:
                         ui.image(diagram)
         self._build_confirm_dialog()
+        self._build_unknown_dialog()
         ui.timer(POLL_INTERVAL, self._refresh)
+        # The timer's first tick is a full interval away, so refresh once now to
+        # avoid the page rendering blank (and the unknown-state prompt appearing
+        # late) on load.
+        background_tasks.create(self._refresh())
+
+    @staticmethod
+    def _get_unknown_state(config, pumping_system):
+        """Return the valves, pumps and stage whose state the system cannot report."""
+        return {
+            "valves": [
+                valve
+                for valve in config.valves
+                if pumping_system.get_valve_state(valve) is None
+            ],
+            "pumps": [
+                pump
+                for pump in config.pumps
+                if pumping_system.get_pump_state(pump) is None
+            ],
+            "stage": bool(config.stage)
+            and pumping_system.get_stage_position() not in config.stage,
+        }
+
+    @staticmethod
+    def _has_unknown_state(unknown):
+        return bool(unknown["valves"] or unknown["pumps"] or unknown["stage"])
+
+    def _build_unknown_dialog(self):
+        # Non-escapable: the rest of the UI is unusable until the operator tells
+        # us what the hardware is actually doing.
+        with ui.dialog().props(
+            "persistent no-esc-dismiss no-backdrop-dismiss"
+        ) as dialog, ui.card():
+            self._build_unknown_content()
+        self._unknown_dialog = dialog
+
+    @ui.refreshable
+    def _build_unknown_content(self):
+        unknown = self._unknown_state or {"valves": [], "pumps": [], "stage": False}
+        self._unknown_valve_switches = {}
+        self._unknown_pump_switches = {}
+        self._unknown_stage_toggle = None
+        ui.label("Specify current state").classes("text-lg font-bold")
+        ui.label(
+            "The system cannot determine the state of the following items. "
+            "Set each one to its current state to continue."
+        ).classes("text-sm")
+        if unknown["valves"]:
+            ui.label("Valves").classes("font-bold mt-2")
+            with ui.grid(columns=4):
+                for valve in unknown["valves"]:
+                    ui.label(valve)
+                    ui.label("Closed")
+                    # `value=None` renders Quasar's indeterminate position, so an
+                    # untouched switch is visually distinct from one set to closed.
+                    self._unknown_valve_switches[valve] = ui.switch(
+                        value=None, on_change=self._update_unknown_submit_state
+                    )
+                    ui.label("Open")
+        if unknown["pumps"]:
+            ui.label("Pumps").classes("font-bold mt-2")
+            with ui.grid(columns=4):
+                for pump in unknown["pumps"]:
+                    ui.label(pump)
+                    ui.label("Off")
+                    self._unknown_pump_switches[pump] = ui.switch(
+                        value=None, on_change=self._update_unknown_submit_state
+                    )
+                    ui.label("On")
+        if unknown["stage"]:
+            ui.label("Stage").classes("font-bold mt-2")
+            self._unknown_stage_toggle = ui.toggle(
+                list(self._config.stage),
+                value=None,
+                on_change=self._update_unknown_submit_state,
+            )
+        with ui.card_actions().classes("justify-end w-full"):
+            self._unknown_submit_button = ui.button(
+                "Submit", on_click=self._on_unknown_submit
+            )
+        self._update_unknown_submit_state()
+
+    def _unknown_selection_complete(self):
+        if any(
+            switch.value is None for switch in self._unknown_valve_switches.values()
+        ):
+            return False
+        if any(switch.value is None for switch in self._unknown_pump_switches.values()):
+            return False
+        if self._unknown_stage_toggle is not None and (
+            self._unknown_stage_toggle.value is None
+        ):
+            return False
+        return True
+
+    def _update_unknown_submit_state(self):
+        if self._unknown_submit_button is not None:
+            # Declaring a wrong state could drive an unsafe action, so require an
+            # explicit choice for every item rather than defaulting.
+            self._unknown_submit_button.enabled = self._unknown_selection_complete()
+
+    async def _on_unknown_submit(self):
+        if not self._unknown_selection_complete():
+            return
+        valves = {
+            valve: ValveState.OPEN if switch.value else ValveState.CLOSED
+            for valve, switch in self._unknown_valve_switches.items()
+        }
+        pumps = {
+            pump: PumpState.ON if switch.value else PumpState.OFF
+            for pump, switch in self._unknown_pump_switches.items()
+        }
+        stage = (
+            self._unknown_stage_toggle.value
+            if self._unknown_stage_toggle is not None
+            else None
+        )
+        await run.io_bound(self._declare_state, valves, pumps, stage)
+        self._unknown_state = None
+        self._unknown_dialog.close()
+        await self._refresh()
+
+    def _declare_state(self, valves, pumps, stage):
+        """Record the operator-declared state in the pumping system.
+
+        Uses the raw setters rather than the safety-checked wrappers: the
+        operator is describing the state the hardware is already in, not
+        commanding a change, and the safety check would need the very state
+        being declared. The safety machine's change timestamps are deliberately
+        left alone since nothing physically moved.
+        """
+        for valve, state in valves.items():
+            self._pumping_system.actuate_valve(valve, state)
+        for pump, state in pumps.items():
+            self._pumping_system.set_pump(pump, state)
+        if stage is not None:
+            self._pumping_system.move_stage(stage)
 
     def _build_confirm_dialog(self):
         # A safety prompt must get an explicit answer, so the dialog cannot be
@@ -216,6 +360,7 @@ class _Page:
             "plan_active": bool(plan),
             "plan_description": [self._describe_step(step) for step in plan],
             "pending_confirmation": self._pumping_system._plan_executor.pending_confirmation,
+            "unknown": self._get_unknown_state(self._config, self._pumping_system),
         }
 
     @staticmethod
@@ -307,7 +452,24 @@ class _Page:
         for gauge, label in self._gauge_labels.items():
             label.text = f"{gauge}: {snapshot['gauges'][gauge]:.2e}"
         self._sync_plan_card(snapshot)
+        self._sync_unknown_dialog(snapshot)
         self._sync_confirm_dialog(snapshot)
+
+    def _sync_unknown_dialog(self, snapshot):
+        unknown = snapshot["unknown"]
+        if not self._has_unknown_state(unknown):
+            if self._unknown_state is not None:
+                # Resolved here or in another tab.
+                self._unknown_state = None
+                self._unknown_dialog.close()
+            return
+        if unknown == self._unknown_state:
+            # Unchanged: leave the open dialog alone so partly-entered input
+            # is not discarded on every poll tick.
+            return
+        self._unknown_state = unknown
+        self._build_unknown_content.refresh()
+        self._unknown_dialog.open()
 
     def _sync_plan_card(self, snapshot):
         # The plan card is only rebuilt when the steps actually change, so the
@@ -318,6 +480,13 @@ class _Page:
 
     def _sync_confirm_dialog(self, snapshot):
         request = snapshot["pending_confirmation"]
+        if self._has_unknown_state(snapshot["unknown"]):
+            # Never stack two persistent dialogs; the unknown-state prompt takes
+            # precedence and a plan cannot meaningfully run from an unknown state.
+            if self._shown_confirmation is not None:
+                self._shown_confirmation = None
+                self._confirm_dialog.close()
+            return
         if request is self._shown_confirmation:
             return
         if request is None:
