@@ -511,11 +511,14 @@ class _Page:
 
     @staticmethod
     def _describe_step(step):
+        action_verbs = {
+            ValveState.CLOSED: "close",
+        }
         if step.wait:
             conditions = [ineq.to_str(gauge) for gauge, ineq in step.wait.items()]
             return f"Wait for {_Page.oxford_comma(conditions)}"
         if step.valve:
-            return f"{step.state.value.capitalize()} {step.valve}"
+            return f"{action_verbs.get(step.state, step.state.value).capitalize()} {step.valve}"
         if step.pump:
             return f"Turn {step.state.value} {step.pump} pump"
         if step.stage:
