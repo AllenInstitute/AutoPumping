@@ -108,9 +108,15 @@ def test_confirmation_request_gives_up_when_cancelled():
 class RecordingSystem:
     """Minimal pumping system that records the actions an executor performs."""
 
-    def __init__(self, confirm):
+    def __init__(self, confirm, safe=True):
         self._config = SimpleNamespace(confirm=confirm)
         self.actions = []
+        # The executor re-checks safety immediately before each action.
+        self._safety_machine = SimpleNamespace(
+            can_move_stage=lambda position: safe,
+            can_actuate_valve=lambda valve, state: safe,
+            can_set_pump=lambda pump, state: safe,
+        )
 
     def _move_stage(self, position):
         self.actions.append(("stage", position))

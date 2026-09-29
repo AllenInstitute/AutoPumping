@@ -1,31 +1,97 @@
+from collections import deque
+from threading import Lock
+from time import time
+
 from nicegui import background_tasks, run, ui
 
 from .config import PumpState, ValveState
 
 POLL_INTERVAL = 1.0
+# How much gauge history the live plot keeps, in seconds.
+HISTORY_WINDOW = 600.0
+
+
+class GaugeHistory:
+    """A bounded, thread-safe history of gauge readings shared by all pages.
+
+    Sampling is driven by each page's poll, so a browser tab opened later sees
+    the history collected so far instead of starting from a blank plot.
+    """
+
+    def __init__(self, gauges, window=HISTORY_WINDOW, min_interval=POLL_INTERVAL / 2):
+        self._gauges = list(gauges)
+        self._window = window
+        self._min_interval = min_interval
+        self._samples = deque()
+        self._last_sample = None
+        # `record` is called from `run.io_bound` worker threads, one per page.
+        self._lock = Lock()
+
+    def record(self, readings, now=None):
+        """Store a set of readings, ignoring samples that arrive too close together.
+
+        Every open tab polls independently, so without the interval check two
+        tabs would record duplicate samples for the same instant.
+        """
+        now = time() if now is None else now
+        with self._lock:
+            if (
+                self._last_sample is not None
+                and now - self._last_sample < self._min_interval
+            ):
+                return False
+            self._last_sample = now
+            self._samples.append((now, dict(readings)))
+            cutoff = now - self._window
+            while self._samples and self._samples[0][0] < cutoff:
+                self._samples.popleft()
+            return True
+
+    def series(self):
+        """Return `{gauge: [[timestamp_ms, value], ...]}` ready for ECharts.
+
+        Timestamps are milliseconds because that is what an ECharts `time` axis
+        expects. Readings that a log axis cannot show (<= 0, or missing) become
+        `None` so the line is drawn with a gap rather than implying a reading
+        that was never taken.
+        """
+        with self._lock:
+            samples = list(self._samples)
+        series = {gauge: [] for gauge in self._gauges}
+        for timestamp, readings in samples:
+            milliseconds = int(timestamp * 1000)
+            for gauge in self._gauges:
+                value = readings.get(gauge)
+                if value is None or value <= 0:
+                    value = None
+                series[gauge].append([milliseconds, value])
+        return series
 
 
 class UI:
     def __init__(self, config, pumping_system, diagram=None):
         self._pumping_system = pumping_system
         self._config = config
+        history = GaugeHistory(config.gauges)
 
         @ui.page("/")
         def _index():
             # Each connecting client gets its own `_Page` instance so that
             # widget references, callbacks, and the polling timer are never
             # shared between browser tabs/reconnections.
-            _Page(config, pumping_system, diagram).build()
+            _Page(config, pumping_system, diagram, history).build()
 
     def run(self):
         ui.run(reload=False)
 
 
 class _Page:
-    def __init__(self, config, pumping_system, diagram):
+    def __init__(self, config, pumping_system, diagram, history=None):
         self._config = config
         self._pumping_system = pumping_system
         self._diagram = diagram
+        self._history = history if history is not None else GaugeHistory(config.gauges)
+        self._gauge_chart = None
         self._auto_switch = None
         self._valve_switches = {}
         self._pump_switches = {}
@@ -47,7 +113,10 @@ class _Page:
     def build(self):
         config = self._config
         diagram = self._diagram
-        with ui.row().classes('w-full'):
+        # A flex child can only fill leftover vertical space if every ancestor
+        # has a definite height, so pin the page content to the viewport.
+        ui.query(".nicegui-content").classes("h-screen flex-nowrap gap-2 p-2")
+        with ui.row().classes('w-full shrink-0'):
             self._auto_switch = ui.switch(
                 "Auto Mode", value=True, on_change=lambda: self._on_auto_mode_change()
             ).classes('flex-shrink-0')
@@ -59,8 +128,8 @@ class _Page:
                             on_click=lambda _, name=named_state: self._on_named_state_click(name),
                         ).props('outline color=primary').classes('flex-1')
                         self._named_state_buttons[named_state] = button
-        with ui.row().classes('w-full'):
-            with ui.column().classes('w-fit item-stretch'):
+        with ui.row().classes('w-full grow min-h-0 items-stretch flex-nowrap'):
+            with ui.column().classes('w-fit item-stretch shrink min-w-0 self-start'):
                 if config.gauges:
                     with ui.card().tight().classes('w-full'):
                         with ui.card_section():
@@ -86,9 +155,9 @@ class _Page:
                                     ui.label("Open")
                                     self._valve_switches[valve] = switch
             self._build_plan()
-            with ui.column().classes('grow'):
+            with ui.column().classes('grow min-h-0 min-w-0 h-full flex-nowrap'):
                 if config.stage:
-                    with ui.card().tight().classes('w-full'):
+                    with ui.card().tight().classes('w-full shrink-0'):
                         with ui.card_section():
                             ui.label("Stage")
                         ui.separator()
@@ -101,7 +170,7 @@ class _Page:
                                     ).props('outline color=primary').classes('flex-1')
                                     self._stage_buttons[position] = button
                 for pump in config.pumps:
-                    with ui.card().tight().classes('w-full'):
+                    with ui.card().tight().classes('w-full shrink-0'):
                         with ui.card_section():
                             ui.label(pump)
                         ui.separator()
@@ -123,8 +192,20 @@ class _Page:
                                     "flow": flow_label,
                                     "speed": speed_label,
                                 }
-                if diagram:
-                    ui.image(diagram)
+                with ui.row().classes('w-full grow min-h-0 min-w-0 flex-nowrap'):
+                    if config.gauges:
+                        with ui.card().tight().classes('grow min-h-0 min-w-0 h-full p-2'):
+                            self._gauge_chart = ui.echart(
+                                self._gauge_chart_options()
+                            ).classes('w-full h-full')
+                    if diagram:
+                        with ui.card().tight().classes('h-full w-auto shrink-0 p-2'):
+                            # A q-img has no intrinsic width, so `w-auto` would
+                            # collapse it; a native <img> derives its width from
+                            # the aspect ratio once the height is pinned.
+                            ui.image(diagram).props('tag=img').classes(
+                                'h-full w-auto object-contain'
+                            )
         self._build_confirm_dialog()
         self._build_unknown_dialog()
         ui.timer(POLL_INTERVAL, self._refresh)
@@ -132,6 +213,55 @@ class _Page:
         # avoid the page rendering blank (and the unknown-state prompt appearing
         # late) on load.
         background_tasks.create(self._refresh())
+
+    def _gauge_chart_options(self):
+        gauges = list(self._config.gauges)
+        return {
+            "tooltip": {"trigger": "axis"},
+            # A single gauge labels itself via the axis name; a legend only
+            # earns its space once there is more than one line to tell apart.
+            "legend": {"show": len(gauges) > 1, "data": gauges},
+            "grid": {
+                "left": 70,
+                "right": 20,
+                "top": 40 if len(gauges) > 1 else 20,
+                "bottom": 40,
+            },
+            "xAxis": {"type": "time"},
+            "yAxis": {
+                "type": "log",
+                "name": "Pressure",
+                # A leading ':' marks the value as JavaScript, so ECharts gets a
+                # real formatter function. Vacuum pressures span many decades,
+                # so plain decimals would be unreadable. Avoid arrow syntax:
+                # the options are embedded in HTML, where '>' gets escaped.
+                "axisLabel": {
+                    ":formatter": "function (value) { return Number(value).toExponential(0); }"
+                },
+            },
+            "series": [
+                {
+                    "name": gauge,
+                    "type": "line",
+                    # 600 points per line; markers would just be noise.
+                    "showSymbol": False,
+                    "data": [],
+                }
+                for gauge in gauges
+            ],
+        }
+
+    def _apply_gauge_series(self, series):
+        if self._gauge_chart is None:
+            return
+        changed = False
+        for entry in self._gauge_chart.options["series"]:
+            data = series.get(entry["name"], [])
+            if entry["data"] != data:
+                entry["data"] = data
+                changed = True
+        if changed:
+            self._gauge_chart.update()
 
     @staticmethod
     def _get_unknown_state(config, pumping_system):
@@ -350,12 +480,16 @@ class _Page:
             for gauge in self._config.gauges
         }
         plan = self._pumping_system.plan
+        # Recording and building the series here keeps both off the event loop,
+        # since `_get_snapshot` already runs via `run.io_bound`.
+        self._history.record(gauges)
         return {
             "valves": valves,
             "pumps": pumps,
             "stage": stage,
             "stages": stages,
             "gauges": gauges,
+            "gauge_series": self._history.series(),
             "plan_active": bool(plan),
             "plan_description": [self._describe_step(step) for step in plan],
             "pending_confirmation": self._pumping_system._plan_executor.pending_confirmation,
@@ -450,6 +584,7 @@ class _Page:
             self._set_button_active(button, self._is_current_named_state(name, snapshot))
         for gauge, label in self._gauge_labels.items():
             label.text = f"{gauge}: {snapshot['gauges'][gauge]:.2e}"
+        self._apply_gauge_series(snapshot["gauge_series"])
         self._sync_plan_card(snapshot)
         self._sync_unknown_dialog(snapshot)
         self._sync_confirm_dialog(snapshot)
@@ -528,7 +663,11 @@ class _Page:
     @ui.refreshable
     def _build_plan(self):
         if self._pumping_system.plan:
-            with ui.card().tight():
+            # `self-start` keeps the card from being stretched to full height by
+            # the row's `items-stretch`. It must stay shrinkable and capped,
+            # though: step descriptions are long sentences, so a `shrink-0` card
+            # would size to its max-content width and push the page off-screen.
+            with ui.card().tight().classes('self-start shrink min-w-0 max-w-xs'):
                 with ui.card_section():
                     ui.label("Plan")
                 ui.separator()

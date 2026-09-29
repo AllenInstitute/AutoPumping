@@ -5,7 +5,7 @@ from pytest import fixture, mark
 from auto_pumping.config import PumpState, ValveState
 from auto_pumping.dummy import DummyPumping
 from auto_pumping.graph import PlanStep
-from auto_pumping.ui import _Page
+from auto_pumping.ui import GaugeHistory, _Page
 
 
 @fixture(scope="module")
