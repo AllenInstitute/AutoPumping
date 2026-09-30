@@ -137,7 +137,7 @@ class PlanExecutor:
         )
 
     def _plan_executor(self):
-        while self._plan is not None and len(self._plan) > 0:
+        while self._current_step is not None or (self._plan is not None and len(self._plan) > 0):
             if self._current_step is None:
                 self._current_step = self._plan.pop(0)
             step = self._current_step
