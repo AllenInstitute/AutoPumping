@@ -1,5 +1,3 @@
-from numpy import fix
-
 from pytest import fixture
 from pathlib import Path
 from auto_pumping.config import Config

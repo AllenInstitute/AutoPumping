@@ -1,5 +1,5 @@
 [build-system]
-requires = ["setuptools>=68", "wheel"]
+requires = ["setuptools>=77", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
@@ -15,18 +15,25 @@ license = "BSD-3-Clause"
 license-files = ["LICENSE"]
 classifiers = [
   "Programming Language :: Python :: 3",
-  "License :: OSI Approved :: MIT License",
   "Operating System :: OS Independent",
+  "Intended Audience :: Science/Research",
+  "Topic :: Scientific/Engineering :: Physics",
 ]
 dependencies = [
   "pydantic",
   "pyyaml",
   "networkx",
+  "nicegui",
+  "pyvis",
 ]
 
 [project.optional-dependencies]
 dev = [
   "pytest",
+  "bump-my-version",
+]
+docs = [
+  "jsonschema2md",
 ]
 
 [tool.setuptools]
