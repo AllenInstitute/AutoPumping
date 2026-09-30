@@ -1,0 +1,168 @@
+# Config
+
+## Properties
+
+- <a id="properties/valves"></a>**`valves`** *(array, required)*: List of all valve names.
+  - <a id="properties/valves/items"></a>**Items** *(string)*
+- <a id="properties/gauges"></a>**`gauges`** *(array, required)*: List of all gauge names.
+  - <a id="properties/gauges/items"></a>**Items** *(string)*
+- <a id="properties/pumps"></a>**`pumps`** *(array, required)*: List of all pump names.
+  - <a id="properties/pumps/items"></a>**Items** *(string)*
+- <a id="properties/stage"></a>**`stage`** *(array, required)*: List of all stage positions.
+  - <a id="properties/stage/items"></a>**Items** *(string)*
+- <a id="properties/named_states"></a>**`named_states`** *(object, required)*: A mapping of names of named states to their corresponding state definitions. Can contain additional properties.
+  - <a id="properties/named_states/additionalProperties"></a>**Additional properties**: Refer to *[#/$defs/NamedState](#%24defs/NamedState)*.
+- <a id="properties/transitions"></a>**`transitions`** *(array, required)*: List of all possible transitions.
+  - <a id="properties/transitions/items"></a>**Items**: Refer to *[#/$defs/Transition](#%24defs/Transition)*.
+- <a id="properties/confirm"></a>**`confirm`** *(required)*: Confirmation requirements for transitions when automated pumping is enabled. Refer to *[#/$defs/Confirm](#%24defs/Confirm)*.
+- <a id="properties/initial_states"></a>**`initial_states`** *(array, required)*: List of initial states to use when building the state graph.
+  - <a id="properties/initial_states/items"></a>**Items**: Refer to *[#/$defs/InitialState](#%24defs/InitialState)*.
+## Definitions
+
+- <a id="%24defs/Confirm"></a>**`Confirm`** *(object)*: Cannot contain additional properties.
+  - <a id="%24defs/Confirm/properties/default"></a>**`default`** *(boolean)*: Default confirmation requirement for transitions. Default: `false`.
+  - <a id="%24defs/Confirm/properties/pump"></a>**`pump`**: Require confirmation before turning pumps on or off, or True to require confirmation for all transitions of a specific pump. Default: `null`.
+    - **Any of**
+      - <a id="%24defs/Confirm/properties/pump/anyOf/0"></a>*object*: Can contain additional properties.
+        - <a id="%24defs/Confirm/properties/pump/anyOf/0/additionalProperties"></a>**Additional properties**
+          - **Any of**
+            - <a id="%24defs/Confirm/properties/pump/anyOf/0/additionalProperties/anyOf/0"></a>: Refer to *[#/$defs/PumpState](#%24defs/PumpState)*.
+            - <a id="%24defs/Confirm/properties/pump/anyOf/0/additionalProperties/anyOf/1"></a>*boolean*
+      - <a id="%24defs/Confirm/properties/pump/anyOf/1"></a>*null*
+  - <a id="%24defs/Confirm/properties/stage"></a>**`stage`**: Require confirmation before moving the stage to any of these positions. Default: `null`.
+    - **Any of**
+      - <a id="%24defs/Confirm/properties/stage/anyOf/0"></a>*array*
+        - <a id="%24defs/Confirm/properties/stage/anyOf/0/items"></a>**Items** *(string)*
+      - <a id="%24defs/Confirm/properties/stage/anyOf/1"></a>*null*
+  - <a id="%24defs/Confirm/properties/valve"></a>**`valve`**: Require confirmation before opening or closing valves, or True to require confirmation for all transitions of a specific valve. Default: `null`.
+    - **Any of**
+      - <a id="%24defs/Confirm/properties/valve/anyOf/0"></a>*object*: Can contain additional properties.
+        - <a id="%24defs/Confirm/properties/valve/anyOf/0/additionalProperties"></a>**Additional properties**
+          - **Any of**
+            - <a id="%24defs/Confirm/properties/valve/anyOf/0/additionalProperties/anyOf/0"></a>: Refer to *[#/$defs/ValveState](#%24defs/ValveState)*.
+            - <a id="%24defs/Confirm/properties/valve/anyOf/0/additionalProperties/anyOf/1"></a>*boolean*
+      - <a id="%24defs/Confirm/properties/valve/anyOf/1"></a>*null*
+- <a id="%24defs/Inequality"></a>**`Inequality`** *(object)*: Cannot contain additional properties.
+  - <a id="%24defs/Inequality/properties/LE"></a>**`LE`**: Upper bound of the inequality (less than or equal to). Default: `null`.
+    - **Any of**
+      - <a id="%24defs/Inequality/properties/LE/anyOf/0"></a>*number*
+      - <a id="%24defs/Inequality/properties/LE/anyOf/1"></a>*null*
+  - <a id="%24defs/Inequality/properties/GE"></a>**`GE`**: Lower bound of the inequality (greater than or equal to). Default: `null`.
+    - **Any of**
+      - <a id="%24defs/Inequality/properties/GE/anyOf/0"></a>*number*
+      - <a id="%24defs/Inequality/properties/GE/anyOf/1"></a>*null*
+- <a id="%24defs/InitialState"></a>**`InitialState`** *(object)*: Cannot contain additional properties.
+  - <a id="%24defs/InitialState/properties/valves"></a>**`valves`**: Initial state of each valve. Default: `null`.
+    - **Any of**
+      - <a id="%24defs/InitialState/properties/valves/anyOf/0"></a>*object*: Can contain additional properties.
+        - <a id="%24defs/InitialState/properties/valves/anyOf/0/additionalProperties"></a>**Additional properties**: Refer to *[#/$defs/ValveState](#%24defs/ValveState)*.
+      - <a id="%24defs/InitialState/properties/valves/anyOf/1"></a>*null*
+  - <a id="%24defs/InitialState/properties/pumps"></a>**`pumps`**: Initial state of each pump. Default: `null`.
+    - **Any of**
+      - <a id="%24defs/InitialState/properties/pumps/anyOf/0"></a>*object*: Can contain additional properties.
+        - <a id="%24defs/InitialState/properties/pumps/anyOf/0/additionalProperties"></a>**Additional properties**: Refer to *[#/$defs/PumpState](#%24defs/PumpState)*.
+      - <a id="%24defs/InitialState/properties/pumps/anyOf/1"></a>*null*
+  - <a id="%24defs/InitialState/properties/stage"></a>**`stage`**: Initial stage location. Default: `null`.
+    - **Any of**
+      - <a id="%24defs/InitialState/properties/stage/anyOf/0"></a>*string*
+      - <a id="%24defs/InitialState/properties/stage/anyOf/1"></a>*null*
+  - <a id="%24defs/InitialState/properties/gauges"></a>**`gauges`**: Initial pressure of each gauge. Default: `null`.
+    - **Any of**
+      - <a id="%24defs/InitialState/properties/gauges/anyOf/0"></a>*object*: Can contain additional properties.
+        - <a id="%24defs/InitialState/properties/gauges/anyOf/0/additionalProperties"></a>**Additional properties** *(number)*
+      - <a id="%24defs/InitialState/properties/gauges/anyOf/1"></a>*null*
+- <a id="%24defs/NamedState"></a>**`NamedState`** *(object)*: Cannot contain additional properties.
+  - <a id="%24defs/NamedState/properties/valves"></a>**`valves`** *(object)*: A mapping of valve names to their states in this named state (not all valves need to be specified). Can contain additional properties. Default: `{}`.
+    - <a id="%24defs/NamedState/properties/valves/additionalProperties"></a>**Additional properties**: Refer to *[#/$defs/ValveState](#%24defs/ValveState)*.
+  - <a id="%24defs/NamedState/properties/stage"></a>**`stage`**: Stage position in this named state. Default: `null`.
+    - **Any of**
+      - <a id="%24defs/NamedState/properties/stage/anyOf/0"></a>*string*
+      - <a id="%24defs/NamedState/properties/stage/anyOf/1"></a>*null*
+  - <a id="%24defs/NamedState/properties/pumps"></a>**`pumps`** *(object)*: A mapping of pump names to their states in this named state (not all pumps need to be specified). Can contain additional properties. Default: `{}`.
+    - <a id="%24defs/NamedState/properties/pumps/additionalProperties"></a>**Additional properties**: Refer to *[#/$defs/PumpState](#%24defs/PumpState)*.
+- <a id="%24defs/PressureChange"></a>**`PressureChange`** *(object)*: Cannot contain additional properties.
+  - <a id="%24defs/PressureChange/properties/time"></a>**`time`** *(number, required)*: Time in minutes that it is expected it will take to reach the specified pressure.
+  - <a id="%24defs/PressureChange/properties/gauge"></a>**`gauge`** *(string, required)*: Name of the gauge for the pressure change.
+  - <a id="%24defs/PressureChange/properties/pressure"></a>**`pressure`** *(number, required)*: Expected gauge pressure after the specified time has elapsed.
+- <a id="%24defs/PumpCondition"></a>**`PumpCondition`** *(object)*: Cannot contain additional properties.
+  - <a id="%24defs/PumpCondition/properties/state"></a>**`state`**: The required state of the pump for the transition to be valid. Default: `null`.
+    - **Any of**
+      - <a id="%24defs/PumpCondition/properties/state/anyOf/0"></a>: Refer to *[#/$defs/PumpState](#%24defs/PumpState)*.
+      - <a id="%24defs/PumpCondition/properties/state/anyOf/1"></a>*null*
+  - <a id="%24defs/PumpCondition/properties/time"></a>**`time`**: Time in seconds that the pump must be in the required state before the transition is valid. Default: `null`.
+    - **Any of**
+      - <a id="%24defs/PumpCondition/properties/time/anyOf/0"></a>*number*
+      - <a id="%24defs/PumpCondition/properties/time/anyOf/1"></a>*null*
+  - <a id="%24defs/PumpCondition/properties/current"></a>**`current`**: Require the pump current draw to be whithin the range specified by the inequality for the transition to be valid. Default: `null`.
+    - **Any of**
+      - <a id="%24defs/PumpCondition/properties/current/anyOf/0"></a>: Refer to *[#/$defs/Inequality](#%24defs/Inequality)*.
+      - <a id="%24defs/PumpCondition/properties/current/anyOf/1"></a>*null*
+  - <a id="%24defs/PumpCondition/properties/voltage"></a>**`voltage`**: Require the pump voltage to be whithin the range specified by the inequality for the transition to be valid. Default: `null`.
+    - **Any of**
+      - <a id="%24defs/PumpCondition/properties/voltage/anyOf/0"></a>: Refer to *[#/$defs/Inequality](#%24defs/Inequality)*.
+      - <a id="%24defs/PumpCondition/properties/voltage/anyOf/1"></a>*null*
+  - <a id="%24defs/PumpCondition/properties/flow"></a>**`flow`**: Require the pump flow rate to be whithin the range specified by the inequality for the transition to be valid. Default: `null`.
+    - **Any of**
+      - <a id="%24defs/PumpCondition/properties/flow/anyOf/0"></a>: Refer to *[#/$defs/Inequality](#%24defs/Inequality)*.
+      - <a id="%24defs/PumpCondition/properties/flow/anyOf/1"></a>*null*
+  - <a id="%24defs/PumpCondition/properties/speed"></a>**`speed`**: Require the pump speed to be whithin the range specified by the inequality for the transition to be valid. Default: `null`.
+    - **Any of**
+      - <a id="%24defs/PumpCondition/properties/speed/anyOf/0"></a>: Refer to *[#/$defs/Inequality](#%24defs/Inequality)*.
+      - <a id="%24defs/PumpCondition/properties/speed/anyOf/1"></a>*null*
+- <a id="%24defs/PumpState"></a>**`PumpState`** *(string)*: Must be one of: "on" or "off".
+- <a id="%24defs/SafetyConditions"></a>**`SafetyConditions`** *(object)*: Cannot contain additional properties.
+  - <a id="%24defs/SafetyConditions/properties/pump"></a>**`pump`**: A mapping of pump names to conditions under which the transition should be automatically executed to prevent damage to the system. Default: `null`.
+    - **Any of**
+      - <a id="%24defs/SafetyConditions/properties/pump/anyOf/0"></a>*object*: Can contain additional properties.
+        - <a id="%24defs/SafetyConditions/properties/pump/anyOf/0/additionalProperties"></a>**Additional properties**: Refer to *[#/$defs/PumpCondition](#%24defs/PumpCondition)*.
+      - <a id="%24defs/SafetyConditions/properties/pump/anyOf/1"></a>*null*
+- <a id="%24defs/Transition"></a>**`Transition`** *(object)*: Cannot contain additional properties.
+  - <a id="%24defs/Transition/properties/stage"></a>**`stage`** *(boolean)*: Set to true if this transition is a stage movement. Default: `false`.
+  - <a id="%24defs/Transition/properties/valve"></a>**`valve`**: Name of the valve to be actuated in this transition. Default: `null`.
+    - **Any of**
+      - <a id="%24defs/Transition/properties/valve/anyOf/0"></a>*string*
+      - <a id="%24defs/Transition/properties/valve/anyOf/1"></a>*null*
+  - <a id="%24defs/Transition/properties/pump"></a>**`pump`**: Name of the pump to be actuated in this transition. Default: `null`.
+    - **Any of**
+      - <a id="%24defs/Transition/properties/pump/anyOf/0"></a>*string*
+      - <a id="%24defs/Transition/properties/pump/anyOf/1"></a>*null*
+  - <a id="%24defs/Transition/properties/from"></a>**`from`**: State of the valve, pump, or stage before the transition.
+    - **Any of**
+      - <a id="%24defs/Transition/properties/from/anyOf/0"></a>: Refer to *[#/$defs/ValveState](#%24defs/ValveState)*.
+      - <a id="%24defs/Transition/properties/from/anyOf/1"></a>: Refer to *[#/$defs/PumpState](#%24defs/PumpState)*.
+      - <a id="%24defs/Transition/properties/from/anyOf/2"></a>*string*
+  - <a id="%24defs/Transition/properties/to"></a>**`to`**: State of the valve, pump, or stage after the transition.
+    - **Any of**
+      - <a id="%24defs/Transition/properties/to/anyOf/0"></a>: Refer to *[#/$defs/ValveState](#%24defs/ValveState)*.
+      - <a id="%24defs/Transition/properties/to/anyOf/1"></a>: Refer to *[#/$defs/PumpState](#%24defs/PumpState)*.
+      - <a id="%24defs/Transition/properties/to/anyOf/2"></a>*string*
+  - <a id="%24defs/Transition/properties/condition"></a>**`condition`**: Conditions that must be met for this transition to be valid. Default: `null`.
+    - **Any of**
+      - <a id="%24defs/Transition/properties/condition/anyOf/0"></a>: Refer to *[#/$defs/TransitionConditions](#%24defs/TransitionConditions)*.
+      - <a id="%24defs/Transition/properties/condition/anyOf/1"></a>*null*
+  - <a id="%24defs/Transition/properties/wait"></a>**`wait`** *(object)*: A mapping of gauge names to pressure inequalities that should be satisfied before this transition is executed when automated pumping is enabled. Can contain additional properties. Default: `{}`.
+    - <a id="%24defs/Transition/properties/wait/additionalProperties"></a>**Additional properties**: Refer to *[#/$defs/Inequality](#%24defs/Inequality)*.
+  - <a id="%24defs/Transition/properties/safety"></a>**`safety`**: Safety conditions under which this transition should be automatically executed to prevent damage to the system. Default: `null`.
+    - **Any of**
+      - <a id="%24defs/Transition/properties/safety/anyOf/0"></a>: Refer to *[#/$defs/SafetyConditions](#%24defs/SafetyConditions)*.
+      - <a id="%24defs/Transition/properties/safety/anyOf/1"></a>*null*
+  - <a id="%24defs/Transition/properties/pressure"></a>**`pressure`** *(array)*: A list of pressure changes that are expected if this transition is executed. Default: `[]`.
+    - <a id="%24defs/Transition/properties/pressure/items"></a>**Items**: Refer to *[#/$defs/PressureChange](#%24defs/PressureChange)*.
+- <a id="%24defs/TransitionConditions"></a>**`TransitionConditions`** *(object)*: Cannot contain additional properties.
+  - <a id="%24defs/TransitionConditions/properties/gauge"></a>**`gauge`** *(object)*: A mapping of gauge names to pressure inequalities that must be satisfied for the transition to be valid. Can contain additional properties. Default: `{}`.
+    - <a id="%24defs/TransitionConditions/properties/gauge/additionalProperties"></a>**Additional properties**: Refer to *[#/$defs/Inequality](#%24defs/Inequality)*.
+  - <a id="%24defs/TransitionConditions/properties/pump"></a>**`pump`** *(object)*: A mapping of pump names to conditions that must be satisfied for the transition to be valid. Can contain additional properties. Default: `{}`.
+    - <a id="%24defs/TransitionConditions/properties/pump/additionalProperties"></a>**Additional properties**: Refer to *[#/$defs/PumpCondition](#%24defs/PumpCondition)*.
+  - <a id="%24defs/TransitionConditions/properties/valve"></a>**`valve`** *(object)*: A mapping of valve names to conditions that must be satisfied for the transition to be valid. Can contain additional properties. Default: `{}`.
+    - <a id="%24defs/TransitionConditions/properties/valve/additionalProperties"></a>**Additional properties**: Refer to *[#/$defs/ValveCondition](#%24defs/ValveCondition)*.
+  - <a id="%24defs/TransitionConditions/properties/stage"></a>**`stage`**: Current stage position required for the transition to be valid. Default: `null`.
+    - **Any of**
+      - <a id="%24defs/TransitionConditions/properties/stage/anyOf/0"></a>*string*
+      - <a id="%24defs/TransitionConditions/properties/stage/anyOf/1"></a>*null*
+- <a id="%24defs/ValveCondition"></a>**`ValveCondition`** *(object)*: Cannot contain additional properties.
+  - <a id="%24defs/ValveCondition/properties/state"></a>**`state`** *(required)*: Required state of the valve. Refer to *[#/$defs/ValveState](#%24defs/ValveState)*.
+  - <a id="%24defs/ValveCondition/properties/time"></a>**`time`**: Time in seconds that the valve must be in the required state before the transition is valid. Default: `null`.
+    - **Any of**
+      - <a id="%24defs/ValveCondition/properties/time/anyOf/0"></a>*number*
+      - <a id="%24defs/ValveCondition/properties/time/anyOf/1"></a>*null*
+- <a id="%24defs/ValveState"></a>**`ValveState`** *(string)*: Must be one of: "open" or "closed".

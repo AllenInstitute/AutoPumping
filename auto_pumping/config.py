@@ -18,9 +18,9 @@ class StrictModel(BaseModel):
 
 
 class NamedState(StrictModel):
-    valves: dict[str, ValveState] = {}
-    stage: str | None = None
-    pumps: dict[str, PumpState] = {}
+    valves: dict[str, ValveState] = Field({}, description="A mapping of valve names to their states in this named state (not all valves need to be specified)")
+    stage: str | None = Field(None, description="Stage position in this named state")
+    pumps: dict[str, PumpState] = Field({}, description="A mapping of pump names to their states in this named state (not all pumps need to be specified)")
 
     def _check_valves(self, valves: list[str]):
         for valve in self.valves.keys():
@@ -38,8 +38,8 @@ class NamedState(StrictModel):
 
 
 class Inequality(StrictModel):
-    LE: float | None = None
-    GE: float | None = None
+    LE: float | None = Field(None, description="Upper bound of the inequality (less than or equal to)")
+    GE: float | None = Field(None, description="Lower bound of the inequality (greater than or equal to)")
 
     @model_validator(mode="after")
     def check_inequality(self):
@@ -69,12 +69,12 @@ class Inequality(StrictModel):
 
 
 class PumpCondition(StrictModel):
-    state: PumpState | None = None
-    time: float | None = None
-    current: Inequality | None = None
-    voltage: Inequality | None = None
-    flow: Inequality | None = None
-    speed: Inequality | None = None
+    state: PumpState | None = Field(None, description="The required state of the pump for the transition to be valid")
+    time: float | None = Field(None, description="Time in seconds that the pump must be in the required state before the transition is valid")
+    current: Inequality | None = Field(None, description="Require the pump current draw to be within the range specified by the inequality for the transition to be valid")
+    voltage: Inequality | None = Field(None, description="Require the pump voltage to be within the range specified by the inequality for the transition to be valid")
+    flow: Inequality | None = Field(None, description="Require the pump flow rate to be within the range specified by the inequality for the transition to be valid")
+    speed: Inequality | None = Field(None, description="Require the pump speed to be within the range specified by the inequality for the transition to be valid")
 
     @model_validator(mode="before")
     def str2model(cls, v):
@@ -84,7 +84,7 @@ class PumpCondition(StrictModel):
 
 
 class SafetyConditions(StrictModel):
-    pump: dict[str, PumpCondition] | None = None
+    pump: dict[str, PumpCondition] | None = Field(None, description="A mapping of pump names to conditions under which the transition should be automatically executed to prevent damage to the system")
 
     def _check_pumps(self, pumps: list[str]):
         if self.pump is not None:
@@ -94,9 +94,9 @@ class SafetyConditions(StrictModel):
 
 
 class PressureChange(StrictModel):
-    time: float
-    gauge: str
-    pressure: float
+    time: float = Field(..., description="Time in minutes that it is expected it will take to reach the specified pressure")
+    gauge: str = Field(..., description="Name of the gauge for the pressure change")
+    pressure: float = Field(..., description="Expected gauge pressure after the specified time has elapsed")
 
     @model_validator(mode="before")
     def dict2fields(cls, raw_data):
@@ -116,8 +116,8 @@ class PressureChange(StrictModel):
 
 
 class ValveCondition(StrictModel):
-    state: ValveState
-    time: float | None = None
+    state: ValveState = Field(..., description="Required state of the valve")
+    time: float | None = Field(None, description="Time in seconds that the valve must be in the required state before the transition is valid")
 
     @model_validator(mode="before")
     def str2model(cls, v):
@@ -127,10 +127,10 @@ class ValveCondition(StrictModel):
 
 
 class TransitionConditions(StrictModel):
-    gauge: dict[str, Inequality] = {}
-    pump: dict[str, PumpCondition] = {}
-    valve: dict[str, ValveCondition] = {}
-    stage: str | None = None
+    gauge: dict[str, Inequality] = Field({}, description="A mapping of gauge names to pressure inequalities that must be satisfied for the transition to be valid")
+    pump: dict[str, PumpCondition] = Field({}, description="A mapping of pump names to conditions that must be satisfied for the transition to be valid")
+    valve: dict[str, ValveCondition] = Field({}, description="A mapping of valve names to conditions that must be satisfied for the transition to be valid")
+    stage: str | None = Field(None, description="Current stage position required for the transition to be valid")
 
     def _check_valves(self, valves: list[str]):
         if self.valve is not None:
@@ -156,19 +156,19 @@ class TransitionConditions(StrictModel):
 
 
 class Transition(StrictModel):
-    stage: bool = False
-    valve: str | None = None
-    pump: str | None = None
+    stage: bool = Field(False, description="Set to true if this transition is a stage movement")
+    valve: str | None = Field(None, description="Name of the valve to be actuated in this transition")
+    pump: str | None = Field(None, description="Name of the pump to be actuated in this transition")
     from_state: ValveState | PumpState | str = Field(
-        ..., validation_alias="from", serialization_alias="from"
+        ..., validation_alias="from", serialization_alias="from", description="State of the valve, pump, or stage before the transition"
     )
     to_state: ValveState | PumpState | str = Field(
-        ..., validation_alias="to", serialization_alias="to"
+        ..., validation_alias="to", serialization_alias="to", description="State of the valve, pump, or stage after the transition"
     )
-    condition: TransitionConditions | None = None
-    wait: dict[str, Inequality] = {}
-    safety: SafetyConditions | None = None
-    pressure: list[PressureChange] = []
+    condition: TransitionConditions | None = Field(None, description="Conditions that must be met for this transition to be valid")
+    wait: dict[str, Inequality] = Field({}, description="A mapping of gauge names to pressure inequalities that should be satisfied before this transition is executed when automated pumping is enabled")
+    safety: SafetyConditions | None = Field(None, description="Safety conditions under which this transition should be automatically executed to prevent damage to the system")
+    pressure: list[PressureChange] = Field([], description="A list of pressure changes that are expected if this transition is executed")
 
     @model_validator(mode="before")
     def pressure2list(cls, v):
@@ -226,10 +226,10 @@ class Transition(StrictModel):
 
 
 class Confirm(StrictModel):
-    default: bool = False
-    pump: dict[str, PumpState | bool] | None = None
-    stage: dict[str, bool] | None = None
-    valve: dict[str, ValveState | bool] | None = None
+    default: bool = Field(False, description="Default confirmation requirement for transitions")
+    pump: dict[str, PumpState | bool] | None = Field(None, description="Require confirmation before turning pumps on or off, or True to require confirmation for all transitions of a specific pump")
+    stage: list[str] | None = Field(None, description="Require confirmation before moving the stage to any of these positions")
+    valve: dict[str, ValveState | bool] | None = Field(None, description="Require confirmation before opening or closing valves, or True to require confirmation for all transitions of a specific valve")
 
     def _check_valves(self, valves: list[str]):
         if self.valve is not None:
@@ -245,18 +245,18 @@ class Confirm(StrictModel):
 
     def _check_stage(self, stages: list[str]):
         if self.stage is not None:
-            for stage in self.stage.keys():
-                if stage not in stages:
+            for position in self.stage:
+                if position not in stages:
                     raise ValueError(
-                        f"Stage position {stage} not in stage position list"
+                        f"Stage position {position} not in stage position list"
                     )
 
 
 class InitialState(StrictModel):
-    valves: dict[str, ValveState] | None = None
-    pumps: dict[str, PumpState] | None = None
-    stage: str | None = None
-    gauges: dict[str, float] | None = None
+    valves: dict[str, ValveState] | None = Field(None, description="Initial state of each valve")
+    pumps: dict[str, PumpState] | None = Field(None, description="Initial state of each pump")
+    stage: str | None = Field(None, description="Initial stage location")
+    gauges: dict[str, float] | None = Field(None, description="Initial pressure of each gauge")
 
     def _check_valves(self, valves: list[str]):
         for valve in valves:
@@ -284,14 +284,14 @@ class InitialState(StrictModel):
 
 
 class Config(StrictModel):
-    valves: list[str]
-    gauges: list[str]
-    pumps: list[str]
-    stage: list[str]
-    named_states: dict[str, NamedState]
-    transitions: list[Transition]
-    confirm: Confirm
-    initial_states: list[InitialState]
+    valves: list[str] = Field(..., description="List of all valve names")
+    gauges: list[str] = Field(..., description="List of all gauge names")
+    pumps: list[str] = Field(..., description="List of all pump names")
+    stage: list[str] = Field(..., description="List of all stage positions")
+    named_states: dict[str, NamedState] = Field(..., description="A mapping of names of named states to their corresponding state definitions")
+    transitions: list[Transition] = Field(..., description="List of all possible transitions")
+    confirm: Confirm = Field(..., description="Confirmation requirements for transitions when automated pumping is enabled")
+    initial_states: list[InitialState] = Field(..., description="List of initial states to use when building the state graph")
 
     @field_validator("initial_states")
     def check_initial_states(cls, v):

@@ -86,7 +86,11 @@ class PlanExecutor:
                 confirm.pump, step.pump, step.state, confirm.default
             )
         if step.stage is not None:
-            return self._confirm_flag(confirm.stage, step.stage, None, confirm.default)
+            # `confirm.stage` lists the positions that need confirmation; any
+            # other position falls back to `confirm.default`.
+            if confirm.stage is not None and step.stage in confirm.stage:
+                return True
+            return confirm.default
         return False
 
     @staticmethod

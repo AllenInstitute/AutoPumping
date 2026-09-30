@@ -62,17 +62,23 @@ def make_executor(confirm):
             PlanStep(pump="turbo", state=PumpState.OFF),
             False,
         ),
-        # Stage entries are boolean only.
+        # Stage entries list the positions that need confirmation.
         (Confirm(default=True), PlanStep(stage="loadlock"), True),
         (
-            Confirm(default=True, stage={"loadlock": False}),
-            PlanStep(stage="loadlock"),
-            False,
-        ),
-        (
-            Confirm(default=False, stage={"loadlock": True}),
+            Confirm(default=True, stage=["loadlock"]),
             PlanStep(stage="loadlock"),
             True,
+        ),
+        # With default=False, only listed positions need confirmation.
+        (
+            Confirm(default=False, stage=["loadlock"]),
+            PlanStep(stage="loadlock"),
+            True,
+        ),
+        (
+            Confirm(default=False, stage=["loadlock"]),
+            PlanStep(stage="microscope"),
+            False,
         ),
     ],
 )
