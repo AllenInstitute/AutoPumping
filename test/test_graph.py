@@ -268,3 +268,117 @@ def test_make_plan(graph):
         PlanStep(valve="VA", state="open"),
         PlanStep(stage="microscope"),
     ]
+
+
+@mark.parametrize(
+    "state",
+    [
+        {
+            "valves": {
+                "VA": "closed",
+                "VB": "closed",
+                "VE": "closed",
+                "VT": "open",
+                "VF": "open",
+                "VR": "closed",
+                "VV1": "closed",
+            },
+            "pumps": {
+                "roughing": "on",
+                "turbo": "on",
+            },
+            "gauges": {
+                "PLL": (4.5e-5, 0.1),
+            },
+            "stage": "loadlock",
+        },
+        {
+            "valves": {
+                "VA": "closed",
+                "VB": "closed",
+                "VE": "open",
+                "VT": "open",
+                "VF": "open",
+                "VR": "closed",
+                "VV1": "closed",
+            },
+            "pumps": {
+                "roughing": "on",
+                "turbo": "on",
+            },
+            "gauges": {
+                "PLL": (9e-6, 4.5e-5),
+            },
+            "stage": "loadlock",
+        },
+    ],
+)
+def test_make_plan_no_loops(graph, state):
+    plan = list(graph.make_plan(state, name="imaging"))
+    assert plan is not None
+    for i in range(len(plan) - 1):
+        step1 = plan[i]
+        step2 = plan[i + 1]
+        assert step1.valve is None or step1.valve != step2.valve
+        assert step1.pump is None or step1.pump != step2.pump
+
+
+@mark.parametrize(
+    "plan, steps_removed",
+    [
+        (
+            [
+                PlanStep(valve="VF", state="closed"),
+                PlanStep(valve="VF", state="open"),
+                PlanStep(wait={"PLL": Inequality(LE=0.1)}),
+                PlanStep(pump="roughing", state="off"),
+            ],
+            2,
+        ),
+        (
+            [
+                PlanStep(valve="VR", state="closed"),
+                PlanStep(valve="VF", state="open"),
+                PlanStep(valve="VR", state="open"),
+            ],
+            0,
+        ),
+        (
+            [
+                PlanStep(pump="roughing", state="off"),
+                PlanStep(pump="roughing", state="on"),
+                PlanStep(valve="VR", state="closed"),
+            ],
+            2,
+        ),
+        (
+            [
+                PlanStep(pump="turbo", state="off"),
+                PlanStep(pump="roughing", state="off"),
+                PlanStep(valve="VV1", state="open"),
+            ],
+            0,
+        ),
+        (
+            [
+                PlanStep(stage="loadlock"),
+                PlanStep(stage="microscope"),
+                PlanStep(valve="VR", state="closed"),
+            ],
+            2,
+        ),
+        (
+            [
+                PlanStep(stage="loadlock"),
+                PlanStep(stage="exchange"),
+                PlanStep(valve="VA", state="closed"),
+            ],
+            0,
+        ),
+    ],
+)
+def test_remove_redundant_steps(graph, plan, steps_removed):
+    graph._make_plan = lambda *args, **kwargs: plan
+    graph._find_state = lambda *args, **kwargs: True
+    assert graph.make_plan({"stage": "microscope"}) == plan[steps_removed:]
+

@@ -1,5 +1,3 @@
-import re
-
 from networkx import DiGraph, dijkstra_path, dijkstra_path_length, relabel_nodes
 from yaml import Node
 from .config import ValveState, PumpState, Inequality, StrictModel
@@ -264,12 +262,7 @@ class PumpingGraph:
                 return PlanStep(pump=pump, state=state)
         raise ValueError("No difference between states")
 
-    def make_plan(self, start_state, **goal_state_data):
-        if not isinstance(start_state, NodeModel):
-            start_state = NodeModel(**start_state)
-        if not isinstance(start_state, UUID):
-            start_state = self._find_state(start_state)
-        assert start_state is not None, f"Cannot find state {start_state}"
+    def _make_plan(self, start_state, **goal_state_data):
         goal_lengths = sorted(
             [
                 (
@@ -289,6 +282,20 @@ class PumpingGraph:
             if edge_data["wait"]:
                 yield PlanStep(wait=edge_data["wait"])
             yield self._state_diff(start_node_data, end_node_data)
+
+    def make_plan(self, start_state, **goal_state_data):
+        if not isinstance(start_state, NodeModel):
+            start_state = NodeModel(**start_state)
+        start_state_id = self._find_state(start_state)
+        assert start_state_id is not None, f"Cannot find state {start_state}"
+        plan = list(self._make_plan(start_state_id, **goal_state_data))
+        if plan[0].valve is not None and plan[0].valve == plan[1].valve:
+            plan = plan[2:]
+        elif plan[0].pump is not None and plan[0].pump == plan[1].pump:
+            plan = plan[2:]
+        elif plan[0].stage is not None and plan[1].stage == start_state.stage:
+            plan = plan[2:]
+        return plan
 
     def draw(self, output_file=None, port=8000):
         net = Network(height="100vh", width="100%", directed=True)
