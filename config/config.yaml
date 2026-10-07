@@ -180,10 +180,8 @@ transitions:
           state: open
           time: 10
     pressure:
-      - PLL: 1e-5
-        time: 20
-      - PLL: 5e-6
-        time: 240
+      PLL: 5e-6
+    time: 240
   - valve: VE
     from: open
     to: closed
@@ -196,7 +194,7 @@ transitions:
           LE: 4.5e-5
     pressure:
       PLL: 5e-6
-      time: 40
+    time: 40
   - valve: VR
     from: closed
     to: open
@@ -207,12 +205,13 @@ transitions:
           time: 15
       valve:
         VF: closed
+        VB: closed
       gauge:
         PLL:
           GE: 0.1
     pressure:
       PLL: 5e-2
-      time: 5
+    time: 5
   - valve: VR
     from: open
     to: closed
@@ -231,7 +230,7 @@ transitions:
         VE: closed
     pressure:
       PLL: 500
-      time: 5
+    time: 5
   - valve: VV1
     from: open
     to: closed

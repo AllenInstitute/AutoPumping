@@ -93,28 +93,6 @@ class SafetyConditions(StrictModel):
                     raise ValueError(f"Pump {pump} not in pumps list")
 
 
-class PressureChange(StrictModel):
-    time: float = Field(..., description="Time in minutes that it is expected it will take to reach the specified pressure")
-    gauge: str = Field(..., description="Name of the gauge for the pressure change")
-    pressure: float = Field(..., description="Expected gauge pressure after the specified time has elapsed")
-
-    @model_validator(mode="before")
-    def dict2fields(cls, raw_data):
-        transformed_data = {}
-        for key, val in raw_data.items():
-            if key not in cls.model_fields:
-                if isinstance(key, str):
-                    transformed_data["gauge"] = key
-                    transformed_data["pressure"] = val
-                    continue
-            transformed_data[key] = val
-        return transformed_data
-
-    def _check_gauges(self, gauges: list[str]):
-        if self.gauge not in gauges:
-            raise ValueError(f"Gauge {self.gauge} not in gauges list")
-
-
 class ValveCondition(StrictModel):
     state: ValveState = Field(..., description="Required state of the valve")
     time: float | None = Field(None, description="Time in seconds that the valve must be in the required state before the transition is valid")
@@ -168,13 +146,8 @@ class Transition(StrictModel):
     condition: TransitionConditions | None = Field(None, description="Conditions that must be met for this transition to be valid")
     wait: dict[str, Inequality] = Field({}, description="A mapping of gauge names to pressure inequalities that should be satisfied before this transition is executed when automated pumping is enabled")
     safety: SafetyConditions | None = Field(None, description="Safety conditions under which this transition should be automatically executed to prevent damage to the system")
-    pressure: list[PressureChange] = Field([], description="A list of pressure changes that are expected if this transition is executed")
-
-    @model_validator(mode="before")
-    def pressure2list(cls, v):
-        if "pressure" in v and isinstance(v["pressure"], dict):
-            v["pressure"] = [v["pressure"]]
-        return v
+    pressure: dict[str, float] = Field({}, description="A mapping of gauges to expected gauge pressures after this transition occurs")
+    time: float | None = Field(None, description="Time in minutes that it is expected that it will take for the pressure changes to occur after this transition is executed")
 
     @model_validator(mode="after")
     def from_to_state2enum(self):
@@ -186,6 +159,14 @@ class Transition(StrictModel):
             self.to_state = PumpState(self.to_state)
         return self
 
+    @model_validator(mode="after")
+    def check_time_pressure(self):
+        if self.time is not None and len(self.pressure) == 0:
+            raise ValueError("Time specified but no pressure changes specified")
+        if self.time is None and len(self.pressure) > 0:
+            raise ValueError("Pressure changes specified but no time specified")
+        return self
+
     def _check_valves(self, valves: list[str]):
         if self.valve is not None and self.valve not in valves:
             raise ValueError(f"Valve {self.valve} not in valves list")
@@ -195,9 +176,9 @@ class Transition(StrictModel):
     def _check_gauges(self, gauges: list[str]):
         if self.condition is not None:
             self.condition._check_gauges(gauges)
-        if self.pressure is not None:
-            for pressure_change in self.pressure:
-                pressure_change._check_gauges(gauges)
+        for gauge in self.pressure.keys():
+            if gauge not in gauges:
+                raise ValueError(f"Gauge {gauge} not in gauges list")
         if self.wait is not None:
             for gauge in self.wait.keys():
                 if gauge not in gauges:

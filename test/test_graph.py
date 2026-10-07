@@ -382,3 +382,55 @@ def test_remove_redundant_steps(graph, plan, steps_removed):
     graph._find_state = lambda *args, **kwargs: True
     assert graph.make_plan({"stage": "microscope"}) == plan[steps_removed:]
 
+
+@mark.parametrize(
+    "valves, pumps, stage, gauges",
+    [
+        (
+            {
+                "VA": "closed",
+                "VB": "closed",
+                "VE": "closed",
+                "VT": "closed",
+                "VF": "closed",
+                "VV1": "closed",
+                "VR": "open",
+            },
+            {
+                "roughing": "on",
+                "turbo": "on",
+            },
+            "loadlock",
+            {
+                "PLL": 0.2,
+            },
+        ),
+        (
+            {
+                "VA": "closed",
+                "VB": "closed",
+                "VE": "closed",
+                "VT": "closed",
+                "VF": "closed",
+                "VV1": "closed",
+                "VR": "open",
+            },
+            {
+                "roughing": "on",
+                "turbo": "on",
+            },
+            "loadlock",
+            {
+                "PLL": 440,
+            },
+        ),
+    ],
+)
+def test_state_exists(graph, valves, pumps, stage, gauges):
+    state = NodeModel(
+        valves=valves,
+        pumps=pumps,
+        stage=stage,
+        gauges={gauge: graph._get_gauge_range(gauge, pressure) for gauge, pressure in gauges.items()},
+    )
+    assert graph._find_state(state) is not None

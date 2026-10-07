@@ -3,10 +3,16 @@ from yaml import Node
 from .config import ValveState, PumpState, Inequality, StrictModel
 from pydantic import model_validator
 from uuid import uuid4, UUID
-from math import inf
+from math import inf, log10
 from pyvis.network import Network
 from http.server import BaseHTTPRequestHandler, HTTPServer
 import webbrowser
+from itertools import product
+
+
+def mean(vals):
+    no_inf = [v for v in vals if v != inf]
+    return sum(no_inf) / len(no_inf)
 
 
 class NodeModel(StrictModel):
@@ -71,6 +77,9 @@ class PumpingGraph:
                 return gauge_range
         raise ValueError(f"Pressure {pressure} is out of range for gauge {gauge}")
 
+    def _get_gauge_range_ind(self, gauge, pressure):
+        return self._gauge_ranges[gauge].index(self._get_gauge_range(gauge, pressure))
+
     def _add_initial_states(self, initial_states, named_states):
         for state in initial_states:
             node_data = NodeModel(
@@ -110,6 +119,7 @@ class PumpingGraph:
                 state_data, transition, named_states
             )
             for new_state_data, time in reachable_states:
+                assert time > 0, f"Time must be positive, got {time} for transition {transition}"
                 new_state_id = self._find_state(new_state_data)
                 if new_state_id is None:
                     new_state_id = self._add_state(new_state_data)
@@ -204,13 +214,47 @@ class PumpingGraph:
             new_state_data.stage = transition.to_state
         new_state_data.name = self._get_state_name(new_state_data, named_states)
         yield new_state_data, 1
-        for pressure_change in transition.pressure:
-            new_state_data = new_state_data.model_copy(deep=True)
-            new_state_data.gauges[pressure_change.gauge] = self._get_gauge_range(
-                pressure_change.gauge, pressure_change.pressure
-            )
+        if transition.pressure is None:
+            return
+        start_pressure_ind = {
+            gauge: self._gauge_ranges[gauge].index(state_data.gauges[gauge])
+            for gauge in self._gauge_ranges
+        }
+        end_pressure_ind = {
+            gauge: self._get_gauge_range_ind(gauge, transition.pressure[gauge])
+                if gauge in transition.pressure
+                else start_pressure_ind[gauge]
+            for gauge in self._gauge_ranges
+        }
+        start_mean_pressures_log = {
+            gauge: log10(mean(self._gauge_ranges[gauge][start_pressure_ind[gauge]]))
+            for gauge in self._gauge_ranges
+        }
+        pressure_diffs_log = {
+            gauge: log10(mean(self._gauge_ranges[gauge][end_pressure_ind[gauge]])) - log10(mean(self._gauge_ranges[gauge][start_pressure_ind[gauge]]))
+            for gauge in self._gauge_ranges
+        }
+        pressure_ind_ranges = {
+            gauge: range(
+                min(start_pressure_ind[gauge], end_pressure_ind[gauge]),
+                max(start_pressure_ind[gauge], end_pressure_ind[gauge]) + 1,
+            ) for gauge in self._gauge_ranges
+        }
+        for pressure_range_inds in product(*pressure_ind_ranges.values()):
+            fractions_complete = []
+            for gauge, ind in zip(pressure_ind_ranges.keys(), pressure_range_inds):
+                new_state_data.gauges[gauge] = self._gauge_ranges[gauge][ind]
+                if pressure_diffs_log[gauge] == 0:
+                    continue
+                fractions_complete.append(
+                    (log10(mean(self._gauge_ranges[gauge][ind])) - start_mean_pressures_log[gauge])
+                    / pressure_diffs_log[gauge]
+                )
             new_state_data.name = self._get_state_name(new_state_data, named_states)
-            yield new_state_data, 60 * pressure_change.time
+            if transition.time is None or len(fractions_complete) == 0:
+                yield new_state_data, 1
+            else:
+                yield new_state_data, max(60 * transition.time * mean(fractions_complete), 1)
 
     @staticmethod
     def _get_state_name(state, named_states):
