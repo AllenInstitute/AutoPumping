@@ -1,5 +1,9 @@
 from threading import Event, Thread
 from time import sleep
+from logging import getLogger
+
+
+logger = getLogger(__name__)
 
 
 class ConfirmationRequest:
@@ -140,6 +144,19 @@ class PlanExecutor:
         while self._current_step is not None or (self._plan is not None and len(self._plan) > 0):
             if self._current_step is None:
                 self._current_step = self._plan.pop(0)
+            if self._current_step.wait is None:
+                plan = None
+                try:
+                    plan = self._pumping_system._pumping_graph.make_plan(
+                        self._pumping_system._get_state(),
+                        **self._pumping_system._pumping_graph._last_goal_state_data,
+                    )
+                except Exception as e:
+                    logger.error(f"Error while attempting to replan: {e}", exc_info=True)
+                if plan is not None and plan[0] != self._current_step:
+                    self._plan = plan
+                    self._current_step = None
+                    continue
             step = self._current_step
             if step.wait is not None:
                 if self._wait_satisfied(step):

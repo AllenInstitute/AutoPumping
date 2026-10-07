@@ -1,4 +1,5 @@
 from types import SimpleNamespace
+from unittest.mock import Mock
 
 from pytest import fixture, mark
 
@@ -196,6 +197,28 @@ def test_unconfirmed_steps_run_without_prompting():
     executor._thread.join(timeout=5)
     assert system.actions == [("valve", "VA", ValveState.OPEN)]
     assert executor.pending_confirmation is None
+
+
+def test_executor_replans_when_current_step_is_outdated():
+    system = RecordingSystem(Confirm(default=False))
+    current_state = object()
+    replacement_step = PlanStep(pump="turbo", state=PumpState.ON)
+    system._get_state = Mock(return_value=current_state)
+    system._pumping_graph = SimpleNamespace(
+        _last_goal_state_data={"name": "imaging"},
+        make_plan=Mock(side_effect=[[replacement_step], [replacement_step]]),
+    )
+
+    executor = PlanExecutor(system)
+    executor.execute_plan([PlanStep(valve="VA", state=ValveState.OPEN)])
+    executor._thread.join(timeout=5)
+
+    assert not executor._thread.is_alive()
+    assert system.actions == [("pump", "turbo", PumpState.ON)]
+    assert system._pumping_graph.make_plan.call_args_list == [
+        ((current_state,), {"name": "imaging"}),
+        ((current_state,), {"name": "imaging"}),
+    ]
 
 
 def test_cancel_releases_a_pending_confirmation():

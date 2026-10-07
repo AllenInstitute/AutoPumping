@@ -68,6 +68,7 @@ class PumpingGraph:
             config.gauges, config.transitions
         )
         self._graph = DiGraph()
+        self._last_goal_state_data = {}
         self._add_initial_states(config.initial_states, config.named_states)
         self._add_reachable_states(config.transitions, config.named_states)
 
@@ -307,6 +308,7 @@ class PumpingGraph:
         raise ValueError("No difference between states")
 
     def _make_plan(self, start_state, **goal_state_data):
+        self._last_goal_state_data = goal_state_data
         goal_lengths = sorted(
             [
                 (
