@@ -15,6 +15,13 @@ def mean(vals):
     return sum(no_inf) / len(no_inf)
 
 
+def log10mean(vals):
+    m = mean(vals)
+    if m <= 0:
+        return 0
+    return log10(mean(vals))
+
+
 class NodeModel(StrictModel):
     name: str | None = None
     valves: dict[str, ValveState] = {}
@@ -228,11 +235,11 @@ class PumpingGraph:
             for gauge in self._gauge_ranges
         }
         start_mean_pressures_log = {
-            gauge: log10(mean(self._gauge_ranges[gauge][start_pressure_ind[gauge]]))
+            gauge: log10mean(self._gauge_ranges[gauge][start_pressure_ind[gauge]])
             for gauge in self._gauge_ranges
         }
         pressure_diffs_log = {
-            gauge: log10(mean(self._gauge_ranges[gauge][end_pressure_ind[gauge]])) - log10(mean(self._gauge_ranges[gauge][start_pressure_ind[gauge]]))
+            gauge: log10mean(self._gauge_ranges[gauge][end_pressure_ind[gauge]]) - log10mean(self._gauge_ranges[gauge][start_pressure_ind[gauge]])
             for gauge in self._gauge_ranges
         }
         pressure_ind_ranges = {
@@ -248,7 +255,7 @@ class PumpingGraph:
                 if pressure_diffs_log[gauge] == 0:
                     continue
                 fractions_complete.append(
-                    (log10(mean(self._gauge_ranges[gauge][ind])) - start_mean_pressures_log[gauge])
+                    (log10mean(self._gauge_ranges[gauge][ind]) - start_mean_pressures_log[gauge])
                     / pressure_diffs_log[gauge]
                 )
             new_state_data.name = self._get_state_name(new_state_data, named_states)

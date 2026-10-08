@@ -9,6 +9,7 @@ valves:
 
 gauges:
   - PLL
+  - PX
 
 pumps:
   - roughing
@@ -94,6 +95,7 @@ initial_states:
       turbo: "on"
     gauges:
       PLL: 5e-6
+      PX: 0
 
 transitions:
   - stage: true

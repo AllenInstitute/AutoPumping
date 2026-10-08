@@ -84,7 +84,8 @@ def test_discretize_gauge_ranges(config):
         config.gauges, config.transitions
     )
     assert gauge_ranges == {
-        "PLL": [(0, 9e-6), (9e-6, 4.5e-5), (4.5e-5, 0.1), (0.1, 430), (430, inf)]
+        "PLL": [(0, 9e-6), (9e-6, 4.5e-5), (4.5e-5, 0.1), (0.1, 430), (430, inf)],
+        "PX": [(0, inf)],
     }
 
 
@@ -223,7 +224,10 @@ def test_get_gauge_range(config, pressure, expected_range):
 )
 def test_is_valid_transition(config, transition, valid):
     state_data = config.initial_states[0].model_dump()
-    state_data["gauges"]["PLL"] = (0.1, 450)
+    state_data["gauges"] = {
+        "PLL": (0.1, 450),
+        "PX": (0, inf),
+    }
     state = NodeModel(**state_data)
     PumpingGraph._is_valid_transition(state, Transition(**transition)) == valid
 
@@ -254,6 +258,7 @@ def test_make_plan(graph):
             },
             "gauges": {
                 "PLL": (4.5e-5, 0.1),
+                "PX": (0, inf),
             },
             "stage": "loadlock",
         },
@@ -289,6 +294,7 @@ def test_make_plan(graph):
             },
             "gauges": {
                 "PLL": (4.5e-5, 0.1),
+                "PX": (0, inf),
             },
             "stage": "loadlock",
         },
@@ -308,6 +314,7 @@ def test_make_plan(graph):
             },
             "gauges": {
                 "PLL": (9e-6, 4.5e-5),
+                "PX": (0, inf),
             },
             "stage": "loadlock",
         },
