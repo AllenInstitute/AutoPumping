@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "AutoPumping"
-version = "0.2.0"
+version = "0.2.1"
 description = "A tool to automate pumping of vacuum systems"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -41,7 +41,7 @@ docs = [
 packages = ["auto_pumping"]
 
 [tool.bumpversion]
-current_version = "0.2.0"
+current_version = "0.2.1"
 commit = true
 # The CI publish job only runs for tags of the form `v<version>`.
 tag = true
