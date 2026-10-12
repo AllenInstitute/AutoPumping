@@ -4,6 +4,7 @@ from pytest import fixture, mark
 
 from auto_pumping.config import PumpState, ValveState
 from auto_pumping.dummy import DummyPumping
+from auto_pumping.executor import ConfirmationRequest
 from auto_pumping.graph import PlanStep
 from auto_pumping.ui import GaugeHistory, _Page
 
@@ -238,7 +239,7 @@ def test_dialog_stays_closed_when_nothing_is_unknown():
 
 def test_confirmation_dialog_is_suppressed_while_state_is_unknown():
     page = make_sync_page()
-    request = SimpleNamespace(step=PlanStep(stage="loadlock"))
+    request = SimpleNamespace(step=PlanStep(stage="loadlock"), resolved=False)
     page._sync_confirm_dialog(
         snapshot({"valves": ["VA"], "pumps": [], "stage": False}, pending=request)
     )
@@ -249,13 +250,27 @@ def test_confirmation_dialog_is_suppressed_while_state_is_unknown():
 
 def test_confirmation_dialog_closes_if_state_becomes_unknown_while_shown():
     page = make_sync_page()
-    request = SimpleNamespace(step=PlanStep(stage="loadlock"))
+    request = SimpleNamespace(step=PlanStep(stage="loadlock"), resolved=False)
     page._sync_confirm_dialog(snapshot(dict(KNOWN), pending=request))
     assert page._confirm_dialog.is_open is True
     page._sync_confirm_dialog(
         snapshot({"valves": ["VA"], "pumps": [], "stage": False}, pending=request)
     )
     assert page._confirm_dialog.is_open is False
+
+
+def test_stale_snapshot_does_not_reopen_answered_confirmation():
+    page = make_sync_page()
+    request = ConfirmationRequest(PlanStep(stage="loadlock"))
+    stale_snapshot = snapshot(dict(KNOWN), pending=request)
+    page._sync_confirm_dialog(stale_snapshot)
+    assert page._confirm_dialog.is_open is True
+
+    request.resolve(True)
+    page._sync_confirm_dialog(stale_snapshot)
+
+    assert page._confirm_dialog.is_open is False
+    assert page._shown_confirmation is None
 
 
 # --- GaugeHistory ---------------------------------------------------------

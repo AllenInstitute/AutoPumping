@@ -614,6 +614,10 @@ class _Page:
 
     def _sync_confirm_dialog(self, snapshot):
         request = snapshot["pending_confirmation"]
+        if request is not None and request.resolved:
+            # A refresh may finish after the operator has answered this request.
+            # Do not let that stale snapshot reopen the dialog.
+            request = None
         if self._has_unknown_state(snapshot["unknown"]):
             # Never stack two persistent dialogs; the unknown-state prompt takes
             # precedence and a plan cannot meaningfully run from an unknown state.
