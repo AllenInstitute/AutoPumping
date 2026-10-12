@@ -1,5 +1,5 @@
 from threading import Event, Thread
-from time import sleep
+from time import monotonic, sleep
 from logging import getLogger, DEBUG
 
 
@@ -46,6 +46,8 @@ class PlanExecutor:
         self._thread = None
         self._pending_confirmation = None
         self._confirmed_step = None
+        self._in_flight_step = None
+        self._actuation_deadline = None
 
     @property
     def plan(self):
@@ -77,6 +79,8 @@ class PlanExecutor:
             self._thread.join()
             self._thread = None
         self._pending_confirmation = None
+        self._in_flight_step = None
+        self._actuation_deadline = None
 
     def _requires_confirmation(self, step):
         confirm = self._pumping_system._config.confirm
@@ -151,10 +155,70 @@ class PlanExecutor:
             self._plan.pop(0)
         self._confirmed_step = None
 
+    def _get_step_state(self, step):
+        if step.valve is not None:
+            return self._pumping_system.get_valve_state(step.valve)
+        if step.pump is not None:
+            return self._pumping_system.get_pump_state(step.pump)
+        if step.stage is not None:
+            return self._pumping_system.get_stage_position()
+        raise ValueError(f"Cannot read state for plan step {step}")
+
+    def _actuate_step(self, step):
+        if step.valve is not None:
+            return self._pumping_system._actuate_valve(step.valve, step.state)
+        if step.pump is not None:
+            return self._pumping_system._set_pump(step.pump, step.state)
+        if step.stage is not None:
+            return self._pumping_system._move_stage(step.stage)
+        return False
+
+    def _start_actuation(self, step):
+        if not self._actuate_step(step):
+            return False
+        self._in_flight_step = step
+        self._actuation_deadline = (
+            monotonic() + self._pumping_system._config.actuation_timeout
+        )
+        return True
+
     def _plan_executor(self):
         while self._plan is not None and len(self._plan) > 0:
             step = self._current_step
             logger.debug(f"Current step is {step}")
+            if self._in_flight_step is step:
+                state = self._get_step_state(step)
+                target = step.state if step.stage is None else step.stage
+                if state == target:
+                    logger.info(f"Actuation reached requested state for {step}")
+                    self._in_flight_step = None
+                    self._actuation_deadline = None
+                    self._complete_current_step(step)
+                    continue
+                if monotonic() >= self._actuation_deadline:
+                    logger.error(
+                        f"Timed out after {self._pumping_system._config.actuation_timeout} "
+                        f"seconds waiting for {step} to reach its requested state; "
+                        f"last observed state was {state}. Cancelling plan."
+                    )
+                    self._plan = None
+                    self._confirmed_step = None
+                    self._in_flight_step = None
+                    self._actuation_deadline = None
+                    return
+                sleep(0.1)
+                continue
+            if step.wait is None and (
+                step.valve is not None
+                or step.pump is not None
+                or step.stage is not None
+            ):
+                state = self._get_step_state(step)
+                target = step.state if step.stage is None else step.stage
+                if state == target:
+                    logger.info(f"{step} already reached its requested state")
+                    self._complete_current_step(step)
+                    continue
             if step.wait is None:
                 logger.debug("Attempting replan")
                 plan = None
@@ -191,9 +255,10 @@ class PlanExecutor:
                     logger.info(f"Stage move to {step.stage} allowed")
                     if self._request_confirmation(step):
                         logger.info(f"Moving stage to {step.stage}")
-                        self._pumping_system._move_stage(step.stage)
-                        self._complete_current_step(step)
-                        continue
+                        if not self._start_actuation(step):
+                            logger.warning(f"Stage move to {step.stage} was not issued")
+                        else:
+                            continue
                     else:
                         logger.error(f"Stage move to {step.stage} not confirmed by operator. Cancelling plan.")
                         self._plan = None
@@ -205,9 +270,12 @@ class PlanExecutor:
                     logger.info(f"Valve {step.valve} can be actuated to {step.state}")
                     if self._request_confirmation(step):
                         logger.info(f"Actuating valve {step.valve} to {step.state}")
-                        self._pumping_system._actuate_valve(step.valve, step.state)
-                        self._complete_current_step(step)
-                        continue
+                        if not self._start_actuation(step):
+                            logger.warning(
+                                f"Valve {step.valve} actuation to {step.state} was not issued"
+                            )
+                        else:
+                            continue
                     else:
                         logger.error(f"Valve actuation for {step.valve} to {step.state} not confirmed by operator. Cancelling plan.")
                         self._plan = None
@@ -219,9 +287,10 @@ class PlanExecutor:
                     logger.info(f"Pump {step.pump} can be set to {step.state}")
                     if self._request_confirmation(step):
                         logger.info(f"Setting pump {step.pump} to {step.state}")
-                        self._pumping_system._set_pump(step.pump, step.state)
-                        self._complete_current_step(step)
-                        continue
+                        if not self._start_actuation(step):
+                            logger.warning(f"Pump {step.pump} setting to {step.state} was not issued")
+                        else:
+                            continue
                     else:
                         logger.error(f"Pump setting for {step.pump} to {step.state} not confirmed by operator. Cancelling plan.")
                         self._plan = None

@@ -269,6 +269,11 @@ class Config(StrictModel):
     gauges: list[str] = Field(..., description="List of all gauge names")
     pumps: list[str] = Field(..., description="List of all pump names")
     stage: list[str] = Field(..., description="List of all stage positions")
+    actuation_timeout: float = Field(
+        30,
+        gt=0,
+        description="Maximum time in seconds to wait for an actuator to reach its requested state",
+    )
     named_states: dict[str, NamedState] = Field(..., description="A mapping of names of named states to their corresponding state definitions")
     transitions: list[Transition] = Field(..., description="List of all possible transitions")
     confirm: Confirm = Field(..., description="Confirmation requirements for transitions when automated pumping is enabled")

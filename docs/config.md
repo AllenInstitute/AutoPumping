@@ -10,6 +10,7 @@
   - <a id="properties/pumps/items"></a>**Items** *(string)*
 - <a id="properties/stage"></a>**`stage`** *(array, required)*: List of all stage positions.
   - <a id="properties/stage/items"></a>**Items** *(string)*
+- <a id="properties/actuation_timeout"></a>**`actuation_timeout`** *(number)*: Maximum time in seconds to wait for an actuator to reach its requested state. Exclusive minimum: `0`. Default: `30`.
 - <a id="properties/named_states"></a>**`named_states`** *(object, required)*: A mapping of names of named states to their corresponding state definitions. Can contain additional properties.
   - <a id="properties/named_states/additionalProperties"></a>**Additional properties**: Refer to *[#/$defs/NamedState](#%24defs/NamedState)*.
 - <a id="properties/transitions"></a>**`transitions`** *(array, required)*: List of all possible transitions.
@@ -80,10 +81,6 @@
       - <a id="%24defs/NamedState/properties/stage/anyOf/1"></a>*null*
   - <a id="%24defs/NamedState/properties/pumps"></a>**`pumps`** *(object)*: A mapping of pump names to their states in this named state (not all pumps need to be specified). Can contain additional properties. Default: `{}`.
     - <a id="%24defs/NamedState/properties/pumps/additionalProperties"></a>**Additional properties**: Refer to *[#/$defs/PumpState](#%24defs/PumpState)*.
-- <a id="%24defs/PressureChange"></a>**`PressureChange`** *(object)*: Cannot contain additional properties.
-  - <a id="%24defs/PressureChange/properties/time"></a>**`time`** *(number, required)*: Time in minutes that it is expected it will take to reach the specified pressure.
-  - <a id="%24defs/PressureChange/properties/gauge"></a>**`gauge`** *(string, required)*: Name of the gauge for the pressure change.
-  - <a id="%24defs/PressureChange/properties/pressure"></a>**`pressure`** *(number, required)*: Expected gauge pressure after the specified time has elapsed.
 - <a id="%24defs/PumpCondition"></a>**`PumpCondition`** *(object)*: Cannot contain additional properties.
   - <a id="%24defs/PumpCondition/properties/state"></a>**`state`**: The required state of the pump for the transition to be valid. Default: `null`.
     - **Any of**
@@ -93,19 +90,19 @@
     - **Any of**
       - <a id="%24defs/PumpCondition/properties/time/anyOf/0"></a>*number*
       - <a id="%24defs/PumpCondition/properties/time/anyOf/1"></a>*null*
-  - <a id="%24defs/PumpCondition/properties/current"></a>**`current`**: Require the pump current draw to be whithin the range specified by the inequality for the transition to be valid. Default: `null`.
+  - <a id="%24defs/PumpCondition/properties/current"></a>**`current`**: Require the pump current draw to be within the range specified by the inequality for the transition to be valid. Default: `null`.
     - **Any of**
       - <a id="%24defs/PumpCondition/properties/current/anyOf/0"></a>: Refer to *[#/$defs/Inequality](#%24defs/Inequality)*.
       - <a id="%24defs/PumpCondition/properties/current/anyOf/1"></a>*null*
-  - <a id="%24defs/PumpCondition/properties/voltage"></a>**`voltage`**: Require the pump voltage to be whithin the range specified by the inequality for the transition to be valid. Default: `null`.
+  - <a id="%24defs/PumpCondition/properties/voltage"></a>**`voltage`**: Require the pump voltage to be within the range specified by the inequality for the transition to be valid. Default: `null`.
     - **Any of**
       - <a id="%24defs/PumpCondition/properties/voltage/anyOf/0"></a>: Refer to *[#/$defs/Inequality](#%24defs/Inequality)*.
       - <a id="%24defs/PumpCondition/properties/voltage/anyOf/1"></a>*null*
-  - <a id="%24defs/PumpCondition/properties/flow"></a>**`flow`**: Require the pump flow rate to be whithin the range specified by the inequality for the transition to be valid. Default: `null`.
+  - <a id="%24defs/PumpCondition/properties/flow"></a>**`flow`**: Require the pump flow rate to be within the range specified by the inequality for the transition to be valid. Default: `null`.
     - **Any of**
       - <a id="%24defs/PumpCondition/properties/flow/anyOf/0"></a>: Refer to *[#/$defs/Inequality](#%24defs/Inequality)*.
       - <a id="%24defs/PumpCondition/properties/flow/anyOf/1"></a>*null*
-  - <a id="%24defs/PumpCondition/properties/speed"></a>**`speed`**: Require the pump speed to be whithin the range specified by the inequality for the transition to be valid. Default: `null`.
+  - <a id="%24defs/PumpCondition/properties/speed"></a>**`speed`**: Require the pump speed to be within the range specified by the inequality for the transition to be valid. Default: `null`.
     - **Any of**
       - <a id="%24defs/PumpCondition/properties/speed/anyOf/0"></a>: Refer to *[#/$defs/Inequality](#%24defs/Inequality)*.
       - <a id="%24defs/PumpCondition/properties/speed/anyOf/1"></a>*null*
@@ -146,8 +143,12 @@
     - **Any of**
       - <a id="%24defs/Transition/properties/safety/anyOf/0"></a>: Refer to *[#/$defs/SafetyConditions](#%24defs/SafetyConditions)*.
       - <a id="%24defs/Transition/properties/safety/anyOf/1"></a>*null*
-  - <a id="%24defs/Transition/properties/pressure"></a>**`pressure`** *(array)*: A list of pressure changes that are expected if this transition is executed. Default: `[]`.
-    - <a id="%24defs/Transition/properties/pressure/items"></a>**Items**: Refer to *[#/$defs/PressureChange](#%24defs/PressureChange)*.
+  - <a id="%24defs/Transition/properties/pressure"></a>**`pressure`** *(object)*: A mapping of gauges to expected gauge pressures after this transition occurs. Can contain additional properties. Default: `{}`.
+    - <a id="%24defs/Transition/properties/pressure/additionalProperties"></a>**Additional properties** *(number)*
+  - <a id="%24defs/Transition/properties/time"></a>**`time`**: Time in minutes that it is expected that it will take for the pressure changes to occur after this transition is executed. Default: `null`.
+    - **Any of**
+      - <a id="%24defs/Transition/properties/time/anyOf/0"></a>*number*
+      - <a id="%24defs/Transition/properties/time/anyOf/1"></a>*null*
 - <a id="%24defs/TransitionConditions"></a>**`TransitionConditions`** *(object)*: Cannot contain additional properties.
   - <a id="%24defs/TransitionConditions/properties/gauge"></a>**`gauge`** *(object)*: A mapping of gauge names to pressure inequalities that must be satisfied for the transition to be valid. Can contain additional properties. Default: `{}`.
     - <a id="%24defs/TransitionConditions/properties/gauge/additionalProperties"></a>**Additional properties**: Refer to *[#/$defs/Inequality](#%24defs/Inequality)*.

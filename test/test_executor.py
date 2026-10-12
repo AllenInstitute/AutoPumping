@@ -116,8 +116,11 @@ class RecordingSystem:
     """Minimal pumping system that records the actions an executor performs."""
 
     def __init__(self, confirm, safe=True):
-        self._config = SimpleNamespace(confirm=confirm)
+        self._config = SimpleNamespace(confirm=confirm, actuation_timeout=30)
         self.actions = []
+        self.valve_states = {}
+        self.pump_states = {}
+        self.stage_position = None
         # The executor re-checks safety immediately before each action.
         self._safety_machine = SimpleNamespace(
             can_move_stage=lambda position: safe,
@@ -127,15 +130,27 @@ class RecordingSystem:
 
     def _move_stage(self, position):
         self.actions.append(("stage", position))
+        self.stage_position = position
         return True
 
     def _actuate_valve(self, valve, state):
         self.actions.append(("valve", valve, state))
+        self.valve_states[valve] = state
         return True
 
     def _set_pump(self, pump, state):
         self.actions.append(("pump", pump, state))
+        self.pump_states[pump] = state
         return True
+
+    def get_valve_state(self, valve):
+        return self.valve_states.get(valve)
+
+    def get_pump_state(self, pump):
+        return self.pump_states.get(pump)
+
+    def get_stage_position(self):
+        return self.stage_position
 
     def get_gauge_pressure(self, gauge):
         return 0.0
@@ -255,6 +270,95 @@ def test_replanning_skips_satisfied_wait_before_current_action():
     system._pumping_graph.make_plan.assert_called_once_with(
         current_state, name="venting"
     )
+
+
+def test_actuation_waits_for_feedback_without_replanning_or_reissuing():
+    system = RecordingSystem(Confirm(default=False))
+    system.get_valve_state = Mock(
+        side_effect=[
+            ValveState.OPEN,
+            ValveState.OPEN,
+            ValveState.OPEN,
+            ValveState.CLOSED,
+        ]
+    )
+    current_state = object()
+    close_vv1 = PlanStep(valve="VV1", state=ValveState.CLOSED)
+    system._get_state = Mock(return_value=current_state)
+    system._pumping_graph = SimpleNamespace(
+        _last_goal_state_data={"name": "venting"},
+        make_plan=Mock(return_value=[close_vv1]),
+    )
+
+    executor = PlanExecutor(system)
+    executor.execute_plan([close_vv1])
+    executor._thread.join(timeout=5)
+
+    assert not executor._thread.is_alive()
+    assert system.actions == [("valve", "VV1", ValveState.CLOSED)]
+    system._pumping_graph.make_plan.assert_called_once_with(
+        current_state, name="venting"
+    )
+    assert executor.plan == []
+
+
+def test_actuation_timeout_logs_failure_and_stops_plan(caplog):
+    system = RecordingSystem(Confirm(default=False))
+    system._config.actuation_timeout = 0.01
+    system.get_valve_state = Mock(return_value=ValveState.OPEN)
+    close_vv1 = PlanStep(valve="VV1", state=ValveState.CLOSED)
+    system._get_state = Mock(return_value=object())
+    system._pumping_graph = SimpleNamespace(
+        _last_goal_state_data={"name": "venting"},
+        make_plan=Mock(return_value=[close_vv1]),
+    )
+
+    executor = PlanExecutor(system)
+    executor.execute_plan([close_vv1])
+    executor._thread.join(timeout=5)
+
+    assert not executor._thread.is_alive()
+    assert system.actions == [("valve", "VV1", ValveState.CLOSED)]
+    assert executor.plan == []
+    assert "Timed out after 0.01 seconds" in caplog.text
+    assert "last observed state was ValveState.OPEN" in caplog.text
+
+
+def test_action_already_at_target_is_not_issued_again():
+    system = RecordingSystem(Confirm(default=False))
+    close_vv1 = PlanStep(valve="VV1", state=ValveState.CLOSED)
+    system.get_valve_state = Mock(return_value=ValveState.CLOSED)
+    system._pumping_graph = SimpleNamespace(
+        _last_goal_state_data={"name": "venting"},
+        make_plan=Mock(),
+    )
+
+    executor = PlanExecutor(system)
+    executor.execute_plan([close_vv1])
+    executor._thread.join(timeout=5)
+
+    assert not executor._thread.is_alive()
+    assert system.actions == []
+    system._pumping_graph.make_plan.assert_not_called()
+
+
+def test_stage_move_completes_after_position_feedback():
+    system = RecordingSystem(Confirm(default=False))
+    system.stage_position = "exchange"
+    move_stage = PlanStep(stage="loadlock")
+    system._get_state = Mock(return_value=object())
+    system._pumping_graph = SimpleNamespace(
+        _last_goal_state_data={"name": "venting"},
+        make_plan=Mock(return_value=[move_stage]),
+    )
+
+    executor = PlanExecutor(system)
+    executor.execute_plan([move_stage])
+    executor._thread.join(timeout=5)
+
+    assert not executor._thread.is_alive()
+    assert system.actions == [("stage", "loadlock")]
+    assert executor.plan == []
 
 
 def test_cancel_releases_a_pending_confirmation():
