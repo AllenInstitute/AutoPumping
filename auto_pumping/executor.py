@@ -42,7 +42,6 @@ class ConfirmationRequest:
 class PlanExecutor:
     def __init__(self, pumping_system):
         self._pumping_system = pumping_system
-        self._current_step = None
         self._plan = None
         self._thread = None
         self._pending_confirmation = None
@@ -50,9 +49,11 @@ class PlanExecutor:
 
     @property
     def plan(self):
-        return ([self._current_step] if self._current_step is not None else []) + (
-            self._plan if self._plan is not None else []
-        )
+        return list(self._plan) if self._plan is not None else []
+
+    @property
+    def _current_step(self):
+        return self._plan[0] if self._plan else None
 
     @property
     def pending_confirmation(self):
@@ -66,7 +67,6 @@ class PlanExecutor:
 
     def cancel(self):
         self._plan = None
-        self._current_step = None
         self._confirmed_step = None
         # Release a thread parked on a confirmation dialog before joining it,
         # otherwise cancelling while the dialog is open deadlocks.
@@ -146,12 +146,16 @@ class PlanExecutor:
             for gauge, ineq in step.wait.items()
         )
 
+    def _complete_current_step(self, step):
+        if self._plan and self._plan[0] is step:
+            self._plan.pop(0)
+        self._confirmed_step = None
+
     def _plan_executor(self):
-        while self._current_step is not None or (self._plan is not None and len(self._plan) > 0):
-            if self._current_step is None:
-                self._current_step = self._plan.pop(0)
-                logger.debug(f"Extracted new current step {self._current_step}")
-            if self._current_step.wait is None:
+        while self._plan is not None and len(self._plan) > 0:
+            step = self._current_step
+            logger.debug(f"Current step is {step}")
+            if step.wait is None:
                 logger.debug("Attempting replan")
                 plan = None
                 try:
@@ -161,17 +165,25 @@ class PlanExecutor:
                     )
                 except Exception as e:
                     logger.error(f"Error while attempting to replan: {e}", exc_info=True)
-                if plan is not None and plan[0] != self._current_step:
-                    logger.info(f"Plan changed")
-                    self._plan = plan
-                    self._current_step = None
-                    continue
-            step = self._current_step
+                if plan is not None:
+                    while plan and plan[0].wait is not None and self._wait_satisfied(plan[0]):
+                        logger.debug(f"Skipping satisfied wait condition {plan[0].wait} while replanning")
+                        plan.pop(0)
+                    if not plan:
+                        logger.info("Replanned goal is already satisfied")
+                        self._plan = None
+                        self._confirmed_step = None
+                        return
+                    if plan[0] != step:
+                        logger.info(f"Plan changed")
+                        self._plan = plan
+                        self._confirmed_step = None
+                        continue
             if step.wait is not None:
                 logger.debug(f"Checking if wait condition {step.wait} is satisfied")
                 if self._wait_satisfied(step):
                     logger.info(f"Wait condition {step.wait} satisfied")
-                    self._current_step = None
+                    self._complete_current_step(step)
                     continue
             if step.stage is not None:
                 logger.debug(f"Checking if stage move to {step.stage} is allowed")
@@ -180,12 +192,11 @@ class PlanExecutor:
                     if self._request_confirmation(step):
                         logger.info(f"Moving stage to {step.stage}")
                         self._pumping_system._move_stage(step.stage)
-                        self._current_step = None
+                        self._complete_current_step(step)
                         continue
                     else:
                         logger.error(f"Stage move to {step.stage} not confirmed by operator. Cancelling plan.")
                         self._plan = None
-                        self._current_step = None
                         self._confirmed_step = None
                         return
             elif step.valve is not None:
@@ -195,12 +206,11 @@ class PlanExecutor:
                     if self._request_confirmation(step):
                         logger.info(f"Actuating valve {step.valve} to {step.state}")
                         self._pumping_system._actuate_valve(step.valve, step.state)
-                        self._current_step = None
+                        self._complete_current_step(step)
                         continue
                     else:
                         logger.error(f"Valve actuation for {step.valve} to {step.state} not confirmed by operator. Cancelling plan.")
                         self._plan = None
-                        self._current_step = None
                         self._confirmed_step = None
                         return
             elif step.pump is not None:
@@ -210,12 +220,11 @@ class PlanExecutor:
                     if self._request_confirmation(step):
                         logger.info(f"Setting pump {step.pump} to {step.state}")
                         self._pumping_system._set_pump(step.pump, step.state)
-                        self._current_step = None
+                        self._complete_current_step(step)
                         continue
                     else:
                         logger.error(f"Pump setting for {step.pump} to {step.state} not confirmed by operator. Cancelling plan.")
                         self._plan = None
-                        self._current_step = None
                         self._confirmed_step = None
                         return
             sleep(1)

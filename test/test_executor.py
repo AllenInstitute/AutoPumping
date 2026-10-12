@@ -199,6 +199,19 @@ def test_unconfirmed_steps_run_without_prompting():
     assert executor.pending_confirmation is None
 
 
+def test_current_step_is_the_head_of_the_plan():
+    executor = make_executor(Confirm(default=False))
+    plan = [
+        PlanStep(wait={"PLL": {"GE": 450}}),
+        PlanStep(valve="VV1", state=ValveState.CLOSED),
+    ]
+    executor._plan = plan
+
+    assert executor._current_step is plan[0]
+    assert executor.plan == plan
+    assert executor.plan is not plan
+
+
 def test_executor_replans_when_current_step_is_outdated():
     system = RecordingSystem(Confirm(default=False))
     current_state = object()
@@ -219,6 +232,29 @@ def test_executor_replans_when_current_step_is_outdated():
         ((current_state,), {"name": "imaging"}),
         ((current_state,), {"name": "imaging"}),
     ]
+
+
+def test_replanning_skips_satisfied_wait_before_current_action():
+    system = RecordingSystem(Confirm(default=False))
+    system.get_gauge_pressure = Mock(return_value=500.0)
+    current_state = object()
+    wait_step = PlanStep(wait={"PLL": {"GE": 450}})
+    close_vv1 = PlanStep(valve="VV1", state=ValveState.CLOSED)
+    system._get_state = Mock(return_value=current_state)
+    system._pumping_graph = SimpleNamespace(
+        _last_goal_state_data={"name": "venting"},
+        make_plan=Mock(return_value=[wait_step, close_vv1]),
+    )
+
+    executor = PlanExecutor(system)
+    executor.execute_plan([close_vv1])
+    executor._thread.join(timeout=5)
+
+    assert not executor._thread.is_alive()
+    assert system.actions == [("valve", "VV1", ValveState.CLOSED)]
+    system._pumping_graph.make_plan.assert_called_once_with(
+        current_state, name="venting"
+    )
 
 
 def test_cancel_releases_a_pending_confirmation():
