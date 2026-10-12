@@ -1,6 +1,6 @@
 import argparse
 from .dummy import DummyPumping
-from logging import basicConfig, DEBUG
+from logging import basicConfig, INFO
 
 
 def build_parser(system_class):
@@ -23,7 +23,7 @@ def build_parser(system_class):
 
 
 def main(system_class):
-    basicConfig(level=DEBUG)
+    basicConfig(level=INFO)
     parser = build_parser(system_class)
     args = parser.parse_args()
     system = system_class.from_config_file(args.config)

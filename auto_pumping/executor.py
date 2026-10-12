@@ -1,9 +1,10 @@
 from threading import Event, Thread
 from time import sleep
-from logging import getLogger
+from logging import getLogger, DEBUG
 
 
 logger = getLogger(__name__)
+logger.setLevel(DEBUG)
 
 
 class ConfirmationRequest:
@@ -188,6 +189,7 @@ class PlanExecutor:
                         self._confirmed_step = None
                         return
             elif step.valve is not None:
+                logger.debug(f"Checking if valve {step.valve} can be actuated to {step.state}")
                 if self._pumping_system._safety_machine.can_actuate_valve(step.valve, step.state):
                     logger.info(f"Valve {step.valve} can be actuated to {step.state}")
                     if self._request_confirmation(step):
@@ -202,6 +204,7 @@ class PlanExecutor:
                         self._confirmed_step = None
                         return
             elif step.pump is not None:
+                logger.debug(f"Checking if pump {step.pump} can be turned {step.state}")
                 if self._pumping_system._safety_machine.can_set_pump(step.pump, step.state):
                     logger.info(f"Pump {step.pump} can be set to {step.state}")
                     if self._request_confirmation(step):
