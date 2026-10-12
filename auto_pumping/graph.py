@@ -342,6 +342,8 @@ class PumpingGraph:
         start_state_id = self._find_state(start_state)
         assert start_state_id is not None, f"Cannot find state {start_state}"
         plan = list(self._make_plan(start_state_id, **goal_state_data))
+        if len(plan) < 2:
+            return plan
         if plan[0].valve is not None and plan[0].valve == plan[1].valve:
             plan = plan[2:]
         elif plan[0].pump is not None and plan[0].pump == plan[1].pump:
