@@ -321,7 +321,7 @@ def test_actuation_timeout_logs_failure_and_stops_plan(caplog):
     assert system.actions == [("valve", "VV1", ValveState.CLOSED)]
     assert executor.plan == []
     assert "Timed out after 0.01 seconds" in caplog.text
-    assert "last observed state was ValveState.OPEN" in caplog.text
+    assert f"last observed state was {ValveState.OPEN}" in caplog.text
 
 
 def test_action_already_at_target_is_not_issued_again():
