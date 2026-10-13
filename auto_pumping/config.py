@@ -18,6 +18,7 @@ class StrictModel(BaseModel):
 
 
 class NamedState(StrictModel):
+    primary: bool = Field(False, description="Set to true if this is one of the primary states users will use")
     valves: dict[str, ValveState] = Field({}, description="A mapping of valve names to their states in this named state (not all valves need to be specified)")
     stage: str | None = Field(None, description="Stage position in this named state")
     pumps: dict[str, PumpState] = Field({}, description="A mapping of pump names to their states in this named state (not all pumps need to be specified)")

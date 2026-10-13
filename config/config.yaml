@@ -22,6 +22,7 @@ stage:
 
 named_states:
   imaging:
+    primary: true
     valves:
       VA: open
       VB: closed
@@ -29,6 +30,7 @@ named_states:
       VV1: closed
     stage: microscope
   exchange:
+    primary: true
     valves:
       VB: open
       VA: closed

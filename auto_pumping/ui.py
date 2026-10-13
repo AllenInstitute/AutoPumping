@@ -1,14 +1,32 @@
+import asyncio
 from collections import deque
 from threading import Lock
 from time import time
+from os import environ
 
 from nicegui import background_tasks, run, ui
 
 from .config import PumpState, ValveState
+from .graph import PlanStep
 
 POLL_INTERVAL = 1.0
 # How much gauge history the live plot keeps, in seconds.
 HISTORY_WINDOW = 600.0
+
+
+class _UIConfirmationRequest:
+    def __init__(self, description, future, plan=None):
+        self.description = description
+        self.plan = plan
+        self._future = future
+
+    @property
+    def resolved(self):
+        return self._future.done()
+
+    def resolve(self, approved):
+        if not self._future.done():
+            self._future.set_result(bool(approved))
 
 
 class GaugeHistory:
@@ -73,24 +91,26 @@ class UI:
         self._pumping_system = pumping_system
         self._config = config
         history = GaugeHistory(config.gauges)
+        action_lock = Lock()
 
         @ui.page("/")
         def _index():
             # Each connecting client gets its own `_Page` instance so that
             # widget references, callbacks, and the polling timer are never
             # shared between browser tabs/reconnections.
-            _Page(config, pumping_system, diagram, history).build()
+            _Page(config, pumping_system, diagram, history, action_lock).build()
 
     def run(self):
-        ui.run(reload=False)
+        ui.run(reload=False, port=int(environ.get("PORT", 8085)))
 
 
 class _Page:
-    def __init__(self, config, pumping_system, diagram, history=None):
+    def __init__(self, config, pumping_system, diagram, history=None, action_lock=None):
         self._config = config
         self._pumping_system = pumping_system
         self._diagram = diagram
         self._history = history if history is not None else GaugeHistory(config.gauges)
+        self._action_lock = action_lock if action_lock is not None else Lock()
         self._gauge_chart = None
         self._auto_switch = None
         self._valve_switches = {}
@@ -100,8 +120,8 @@ class _Page:
         self._stage_buttons = {}
         self._gauge_labels = {}
         self._confirm_dialog = None
-        self._confirm_content = None
         self._shown_confirmation = None
+        self._local_confirmation = None
         self._plan_description = None
         self._unknown_dialog = None
         self._unknown_state = None
@@ -113,6 +133,19 @@ class _Page:
     def build(self):
         config = self._config
         diagram = self._diagram
+        ui.add_head_html(
+            """
+            <style>
+                .confirmation-plan-timeline .q-timeline__entry {
+                    padding-bottom: 4px;
+                }
+                .confirmation-plan-timeline .q-timeline__content {
+                    padding-bottom: 0;
+                    line-height: 1.2;
+                }
+            </style>
+            """
+        )
         # A flex child can only fill leftover vertical space if every ancestor
         # has a definite height, so pin the page content to the viewport.
         ui.query(".nicegui-content").classes("h-screen flex-nowrap gap-2 p-2")
@@ -121,13 +154,25 @@ class _Page:
                 "Auto Mode", value=True, on_change=lambda: self._on_auto_mode_change()
             ).classes('flex-shrink-0')
             if config.named_states:
-                with ui.button_group().props('outline').classes('flex-1 ml-4 bg-transparent'):
-                    for named_state in config.named_states:
-                        button = ui.button(
-                            named_state,
-                            on_click=lambda _, name=named_state: self._on_named_state_click(name),
-                        ).props('outline color=primary').classes('flex-1')
-                        self._named_state_buttons[named_state] = button
+                primary_states = [
+                    name for name, state in config.named_states.items() if state.primary
+                ]
+                other_states = [
+                    name for name, state in config.named_states.items() if not state.primary
+                ]
+                with ui.row().classes('flex-1 ml-4 flex-nowrap min-w-0'):
+                    for states in (primary_states, other_states):
+                        if not states:
+                            continue
+                        with ui.button_group().props('outline').style(
+                            f'flex: {len(states)} 1 0%; min-width: 0;'
+                        ).classes('bg-transparent'):
+                            for named_state in states:
+                                button = ui.button(
+                                    named_state,
+                                    on_click=lambda _, name=named_state: self._on_named_state_click(name),
+                                ).props('outline color=primary').classes('flex-1 min-w-0')
+                                self._named_state_buttons[named_state] = button
         with ui.row().classes('w-full grow min-h-0 items-stretch flex-nowrap'):
             with ui.column().classes('w-fit item-stretch shrink min-w-0 self-start'):
                 if config.gauges:
@@ -399,9 +444,11 @@ class _Page:
     def _build_confirm_dialog(self):
         # A safety prompt must get an explicit answer, so the dialog cannot be
         # dismissed by clicking the backdrop or pressing Escape.
-        with ui.dialog().props("persistent") as dialog, ui.card():
+        with ui.dialog().props(
+            "persistent no-esc-dismiss no-backdrop-dismiss"
+        ) as dialog, ui.card():
             ui.label("Confirm action").classes("text-lg font-bold")
-            self._confirm_content = ui.label()
+            self._build_confirmation_content()
             with ui.card_actions().classes("justify-end w-full"):
                 ui.button("Cancel", on_click=lambda: self._on_confirm_response(False)).props(
                     "outline color=primary"
@@ -413,39 +460,103 @@ class _Page:
         request = self._shown_confirmation
         self._shown_confirmation = None
         self._confirm_dialog.close()
+        is_local_request = request is not None and request is self._local_confirmation
         if request is not None:
+            if is_local_request:
+                self._local_confirmation = None
             request.resolve(approved)
-        background_tasks.create(self._refresh())
+        if not is_local_request:
+            background_tasks.create(self._refresh())
 
     def _on_auto_mode_change(self):
         background_tasks.create(self._refresh())
 
+    def _begin_action(self):
+        if self._pumping_system.plan or not self._action_lock.acquire(blocking=False):
+            return False
+        return True
+
+    def _end_action(self):
+        self._action_lock.release()
+
+    async def _confirm_ui_action(self, description, plan=None):
+        future = asyncio.get_running_loop().create_future()
+        request = _UIConfirmationRequest(description, future, plan=plan)
+        self._local_confirmation = request
+        self._shown_confirmation = request
+        self._build_confirmation_content.refresh()
+        self._confirm_dialog.open()
+        return await future
+
+    def _make_proposed_plan(self, goal_state_data):
+        return list(
+            self._pumping_system._pumping_graph.make_plan(
+                self._pumping_system._get_state(), **goal_state_data
+            )
+        )
+
+    async def _run_manual_action(self, step, action):
+        if not self._begin_action():
+            await self._refresh()
+            return
+        try:
+            if await self._confirm_ui_action(self._describe_step(step)):
+                if await run.io_bound(action) is False:
+                    ui.notify(
+                        f"{self._describe_step(step)} was blocked by safety conditions.",
+                        type="warning",
+                    )
+        finally:
+            self._end_action()
+            await self._refresh()
+
+    async def _run_auto_plan(self, goal_state_data):
+        if not self._begin_action():
+            await self._refresh()
+            return
+        try:
+            plan = await run.io_bound(self._make_proposed_plan, goal_state_data)
+            if not plan:
+                return
+            if await self._confirm_ui_action("Proposed plan", plan=plan):
+                await run.io_bound(
+                    self._pumping_system._plan_executor.execute_plan, plan
+                )
+        finally:
+            self._end_action()
+            await self._refresh()
+
     async def _on_valve_change(self, e, valve):
         state = ValveState.OPEN if e.value else ValveState.CLOSED
         if self._auto_switch.value:
-            await run.io_bound(self._pumping_system.auto, valves={valve: state})
+            await self._run_auto_plan({"valves": {valve: state}})
         else:
-            await run.io_bound(self._pumping_system._actuate_valve, valve, state)
-        await self._refresh()
+            await self._run_manual_action(
+                PlanStep(valve=valve, state=state),
+                lambda: self._pumping_system._actuate_valve(valve, state),
+            )
 
     async def _on_pump_change(self, e, pump):
         state = PumpState.ON if e.value else PumpState.OFF
         if self._auto_switch.value:
-            await run.io_bound(self._pumping_system.auto, pumps={pump: state})
+            await self._run_auto_plan({"pumps": {pump: state}})
         else:
-            await run.io_bound(self._pumping_system._set_pump, pump, state)
-        await self._refresh()
+            await self._run_manual_action(
+                PlanStep(pump=pump, state=state),
+                lambda: self._pumping_system._set_pump(pump, state),
+            )
 
     async def _on_named_state_click(self, name):
-        await run.io_bound(self._pumping_system.auto, name=name)
-        await self._refresh()
+        await self._run_auto_plan({"name": name})
 
     async def _on_stage_click(self, position):
         if self._auto_switch.value:
-            await run.io_bound(self._pumping_system.auto, stage=position)
+            await self._run_auto_plan({"stage": position})
         else:
-            await run.io_bound(self._pumping_system._move_stage, position)
-        await self._refresh()
+            await self._run_manual_action(
+                PlanStep(stage=position),
+                lambda: self._pumping_system._move_stage(position),
+            )
 
     async def _on_abort_plan(self):
         # `cancel()` joins the executor thread, which can take up to a second,
@@ -491,6 +602,7 @@ class _Page:
             "gauges": gauges,
             "gauge_series": self._history.series(),
             "plan_active": bool(plan),
+            "action_busy": bool(plan) or self._action_lock.locked(),
             "plan_description": [self._describe_step(step) for step in plan],
             "pending_confirmation": self._pumping_system._plan_executor.pending_confirmation,
             "unknown": self._get_unknown_state(self._config, self._pumping_system),
@@ -554,15 +666,15 @@ class _Page:
 
     def _apply_snapshot(self, snapshot):
         auto_mode = self._auto_switch.value
-        plan_active = snapshot["plan_active"]
+        action_busy = snapshot.get("action_busy", snapshot["plan_active"])
         for valve, switch in self._valve_switches.items():
             data = snapshot["valves"][valve]
             self._set_value_silently(switch, data["state"] == ValveState.OPEN)
-            switch.enabled = not plan_active and (auto_mode or data["safe"])
+            switch.enabled = not action_busy and (auto_mode or data["safe"])
         for pump, switch in self._pump_switches.items():
             data = snapshot["pumps"][pump]
             self._set_value_silently(switch, data["state"] == PumpState.ON)
-            switch.enabled = not plan_active and (auto_mode or data["safe"])
+            switch.enabled = not action_busy and (auto_mode or data["safe"])
             labels = self._pump_labels[pump]
             labels["current"].text = (
                 f"Current: {data['current']:.2f}" if data["current"] is not None else ""
@@ -577,10 +689,10 @@ class _Page:
                 f"Speed: {data['speed']:.2f}" if data["speed"] is not None else ""
             )
         for position, button in self._stage_buttons.items():
-            button.enabled = not plan_active and (auto_mode or snapshot["stages"][position])
+            button.enabled = not action_busy and (auto_mode or snapshot["stages"][position])
             self._set_button_active(button, position == snapshot["stage"])
         for name, button in self._named_state_buttons.items():
-            button.enabled = not plan_active and auto_mode
+            button.enabled = not action_busy and auto_mode
             self._set_button_active(button, self._is_current_named_state(name, snapshot))
         for gauge, label in self._gauge_labels.items():
             label.text = f"{gauge}: {snapshot['gauges'][gauge]:.2e}"
@@ -613,7 +725,7 @@ class _Page:
             self._build_plan.refresh()
 
     def _sync_confirm_dialog(self, snapshot):
-        request = snapshot["pending_confirmation"]
+        request = snapshot["pending_confirmation"] or self._local_confirmation
         if request is not None and request.resolved:
             # A refresh may finish after the operator has answered this request.
             # Do not let that stale snapshot reopen the dialog.
@@ -633,7 +745,7 @@ class _Page:
             self._confirm_dialog.close()
             return
         self._shown_confirmation = request
-        self._confirm_content.text = self._describe_step(request.step)
+        self._build_confirmation_content.refresh()
         self._confirm_dialog.open()
 
     def _is_current_named_state(self, name, snapshot):
@@ -664,6 +776,25 @@ class _Page:
             return f"Move stage to {step.stage}"
         return ""
 
+    def _build_plan_timeline(self, plan, compact=False):
+        timeline = ui.timeline(side="right")
+        if compact:
+            timeline.classes("confirmation-plan-timeline")
+        with timeline:
+            for step in plan:
+                ui.timeline_entry(self._describe_step(step))
+
+    @ui.refreshable
+    def _build_confirmation_content(self):
+        request = self._shown_confirmation
+        if isinstance(request, _UIConfirmationRequest) and request.plan is not None:
+            ui.label(request.description).classes("text-lg")
+            self._build_plan_timeline(request.plan, compact=True)
+        elif isinstance(request, _UIConfirmationRequest):
+            ui.label(request.description).style("white-space: pre-line")
+        elif request is not None:
+            ui.label(self._describe_step(request.step))
+
     @ui.refreshable
     def _build_plan(self):
         if self._pumping_system.plan:
@@ -676,9 +807,7 @@ class _Page:
                     ui.label("Plan")
                 ui.separator()
                 with ui.card_section():
-                    with ui.timeline(side="right"):
-                        for step in self._pumping_system.plan:
-                            ui.timeline_entry(self._describe_step(step))
+                    self._build_plan_timeline(self._pumping_system.plan)
                 ui.separator()
                 with ui.card_actions():
                     ui.button("Abort Plan", on_click=self._on_abort_plan)

@@ -12,7 +12,7 @@ To support automated pumping of the vacuum system a solver was implemented using
 
 ## UI
 
-A NiceGUI based UI is also included. It is automatically built based on the configuration file. A dummy pumping system is available as an example and can be run with: `python -m auto_pumping -c config/config.yaml run`.
+A NiceGUI based UI is also included. It is automatically built based on the configuration file. Manual valve, pump, and stage actions require confirmation, and auto mode displays the proposed plan for approval before execution; configured per-step confirmations remain in effect. A dummy pumping system is available as an example and can be run with: `python -m auto_pumping -c config/config.yaml run`.
 
 ## Getting Started
 

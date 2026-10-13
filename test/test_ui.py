@@ -1,4 +1,7 @@
+import asyncio
+from threading import Lock
 from types import SimpleNamespace
+from unittest.mock import MagicMock, Mock
 
 from pytest import fixture, mark
 
@@ -183,7 +186,8 @@ def make_sync_page():
     page._build_unknown_content = FakeRefreshable()
     page._confirm_dialog = FakeDialog()
     page._shown_confirmation = None
-    page._confirm_content = FakeSwitch("")
+    page._local_confirmation = None
+    page._build_confirmation_content = FakeRefreshable()
     return page
 
 
@@ -271,6 +275,199 @@ def test_stale_snapshot_does_not_reopen_answered_confirmation():
 
     assert page._confirm_dialog.is_open is False
     assert page._shown_confirmation is None
+
+
+def make_action_page(auto_mode=False, action_lock=None):
+    page = _Page.__new__(_Page)
+    page._pumping_system = SimpleNamespace(
+        plan=[],
+        _plan_executor=SimpleNamespace(execute_plan=Mock()),
+        _pumping_graph=SimpleNamespace(
+            make_plan=Mock(),
+            _last_goal_state_data={},
+        ),
+        _get_state=Mock(return_value=object()),
+        _actuate_valve=Mock(return_value=True),
+        _set_pump=Mock(return_value=True),
+        _move_stage=Mock(return_value=True),
+    )
+    page._auto_switch = FakeSwitch(auto_mode)
+    page._confirm_dialog = FakeDialog()
+    page._shown_confirmation = None
+    page._local_confirmation = None
+    page._build_confirmation_content = FakeRefreshable()
+    page._action_lock = action_lock if action_lock is not None else Lock()
+
+    async def refresh():
+        return None
+
+    page._refresh = refresh
+    return page
+
+
+async def complete_after_confirmation(page, operation, approved):
+    task = asyncio.create_task(operation)
+    while page._local_confirmation is None:
+        await asyncio.sleep(0)
+    request = page._local_confirmation
+    assert page._confirm_dialog.is_open
+    page._on_confirm_response(approved)
+    await task
+    return request
+
+
+def patch_async_ui_io(monkeypatch):
+    import auto_pumping.ui as ui_module
+
+    async def inline_io_bound(function, *args, **kwargs):
+        return function(*args, **kwargs)
+
+    monkeypatch.setattr(ui_module.run, "io_bound", inline_io_bound)
+    monkeypatch.setattr(
+        ui_module.background_tasks,
+        "create",
+        lambda coroutine: asyncio.create_task(coroutine),
+    )
+
+
+def test_manual_valve_action_requires_confirmation_and_cancel_does_not_actuate(
+    monkeypatch,
+):
+    patch_async_ui_io(monkeypatch)
+    page = make_action_page()
+
+    request = asyncio.run(
+        complete_after_confirmation(
+            page,
+            page._on_valve_change(SimpleNamespace(value=False), "VA"),
+            approved=False,
+        )
+    )
+
+    assert request.description == "Close VA"
+    page._pumping_system._actuate_valve.assert_not_called()
+    assert page._action_lock.locked() is False
+
+
+def test_manual_valve_action_runs_after_confirmation(monkeypatch):
+    patch_async_ui_io(monkeypatch)
+    page = make_action_page()
+
+    request = asyncio.run(
+        complete_after_confirmation(
+            page,
+            page._on_valve_change(SimpleNamespace(value=True), "VA"),
+            approved=True,
+        )
+    )
+
+    assert request.description == "Open VA"
+    page._pumping_system._actuate_valve.assert_called_once_with(
+        "VA", ValveState.OPEN
+    )
+
+
+@mark.parametrize(
+    "operation, description",
+    [
+        ("pump", "Turn on turbo pump"),
+        ("stage", "Move stage to loadlock"),
+    ],
+)
+def test_manual_pump_and_stage_actions_require_confirmation(
+    monkeypatch, operation, description
+):
+    patch_async_ui_io(monkeypatch)
+    page = make_action_page()
+
+    async def run_action():
+        if operation == "pump":
+            return await complete_after_confirmation(
+                page,
+                page._on_pump_change(SimpleNamespace(value=True), "turbo"),
+                approved=True,
+            )
+        return await complete_after_confirmation(
+            page, page._on_stage_click("loadlock"), approved=True
+        )
+
+    assert asyncio.run(run_action()).description == description
+    if operation == "pump":
+        page._pumping_system._set_pump.assert_called_once_with(
+            "turbo", PumpState.ON
+        )
+    else:
+        page._pumping_system._move_stage.assert_called_once_with("loadlock")
+
+
+@mark.parametrize("approved", [True, False])
+def test_auto_mode_shows_proposed_plan_and_starts_only_on_approval(
+    monkeypatch, approved
+):
+    patch_async_ui_io(monkeypatch)
+    page = make_action_page(auto_mode=True)
+    plan = [
+        PlanStep(wait={"PLL": {"GE": 450}}),
+        PlanStep(valve="VV1", state=ValveState.CLOSED),
+    ]
+    page._pumping_system._pumping_graph.make_plan.return_value = plan
+
+    request = asyncio.run(
+        complete_after_confirmation(
+            page,
+            page._on_named_state_click("venting"),
+            approved=approved,
+        )
+    )
+
+    assert request.description == "Proposed plan"
+    assert request.plan == plan
+    if approved:
+        page._pumping_system._plan_executor.execute_plan.assert_called_once_with(plan)
+    else:
+        page._pumping_system._plan_executor.execute_plan.assert_not_called()
+
+
+def test_action_lock_prevents_overlapping_confirmations():
+    lock = Lock()
+    first_page = make_action_page(action_lock=lock)
+    second_page = make_action_page(action_lock=lock)
+
+    assert first_page._begin_action() is True
+    assert second_page._begin_action() is False
+
+    first_page._end_action()
+    assert second_page._begin_action() is True
+    second_page._end_action()
+
+
+def test_plan_timeline_renders_steps_with_shared_timeline_widgets(monkeypatch):
+    import auto_pumping.ui as ui_module
+
+    timeline_context = MagicMock()
+    timeline_context.classes.return_value = timeline_context
+    timeline = Mock(return_value=timeline_context)
+    timeline_entry = Mock()
+    monkeypatch.setattr(ui_module.ui, "timeline", timeline)
+    monkeypatch.setattr(ui_module.ui, "timeline_entry", timeline_entry)
+    page = _Page.__new__(_Page)
+    plan = [
+        PlanStep(wait={"PLL": {"GE": 450}}),
+        PlanStep(valve="VV1", state=ValveState.CLOSED),
+        PlanStep(pump="turbo", state=PumpState.ON),
+        PlanStep(stage="loadlock"),
+    ]
+
+    page._build_plan_timeline(plan, compact=True)
+
+    timeline.assert_called_once_with(side="right")
+    timeline_context.classes.assert_called_once_with("confirmation-plan-timeline")
+    assert [call.args[0] for call in timeline_entry.call_args_list] == [
+        "Wait for PLL >= 450.0",
+        "Close VV1",
+        "Turn on turbo pump",
+        "Move stage to loadlock",
+    ]
 
 
 # --- GaugeHistory ---------------------------------------------------------
@@ -368,6 +565,7 @@ class _StubChart:
 def _chart_page(config):
     page = _Page.__new__(_Page)
     page._config = config
+    page._action_lock = Lock()
     page._gauge_chart = _StubChart(page._gauge_chart_options())
     return page
 
